@@ -1,5 +1,1 @@
-<<<<<<< HEAD
-# sounds
-=======
-# Wavey Sounds
->>>>>>> live
+## Sounds
