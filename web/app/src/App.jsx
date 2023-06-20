@@ -1,0 +1,493 @@
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+
+import jwt_decode from "jwt-decode";
+import axios from "axios";
+import { Sounds } from "./Sounds";
+import { StoreProvider, StoreContext } from "./Store";
+import { apiHost, apiToken } from "./Api";
+import { Player } from "./Player";
+import { AudioManager } from "./AudioManager";
+
+function readRawFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const rawData = new Uint8Array(event.target.result);
+      resolve(rawData);
+    };
+
+    reader.onerror = (event) => {
+      reject(event.target.error);
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function createImageDataBuffer(rawData, height, frameSize, frameCount, channelCount) {
+  frameCount = 2000;
+  const width = frameSize * frameCount;
+  const buffer = new ImageData(width, height);
+
+  const cols = [
+    [236, 72, 153],
+    [110, 231, 183],
+    [203, 213, 225],
+  ];
+
+  for (let frame = 0; frame < frameCount; frame++) {
+    const frameOffset = frame * frameSize * channelCount * 2;
+
+    for (let channel = 0; channel < channelCount; channel++) {
+      const channelOffset = channel * frameSize;
+      const channelBuffer = new Uint8Array(rawData.buffer, channelOffset + frameOffset, frameSize);
+
+      let col = cols[channel];
+      for (let i = 0; i < channelBuffer.length; i += 2) {
+        const yMin = channelBuffer[i] * 255 / 512;  // Scale from 0-512 to 0-255
+        const yMax = channelBuffer[i + 1] * 255 / 512;  // Scale from 0-512 to 0-255
+        const xIncrement = (i / 2 + frame * frameSize) | 0;
+        let x = i;
+        for (let y = yMin; y <= yMax; y++) {
+          const pixelIndex = (y * width + x + xIncrement) * 4;
+
+          if (buffer.data[pixelIndex] === col[0]) col = cols[2];
+          buffer.data[pixelIndex] = col[0];     // Set the red channel value
+          buffer.data[pixelIndex + 1] = col[1]; // Set the green channel value
+          buffer.data[pixelIndex + 2] = col[2]; // Set the blue channel value
+          buffer.data[pixelIndex + 3] = 255;    // Set the alpha channel value
+        }
+      }
+    }
+  }
+
+  return buffer;
+}
+
+function createImageDataBuffer(rawData, height, frameSize, frameCount, channelCount) {
+  frameCount = 1000
+  const width = frameSize * frameCount;
+  const buffer = new ImageData(width, height);
+
+  console.log(rawData, height, frameSize, frameCount, channelCount);
+  const cols = [
+    [236, 72, 153],
+    [110, 231, 183],
+    [203, 213, 225],
+  ];
+
+  const totalDataSize = rawData.length;
+  const fullFrameSize = frameSize * channelCount;
+
+  for (let frame = 0; frame < frameCount; frame++) {
+    const frameOffset = frame * fullFrameSize * 4;
+
+    for (let channel = 0; channel < channelCount - 1; channel++) {
+      const channelOffset = channel * frameSize * 4;
+      const dataSize = (frame < frameCount - 1) ? frameSize : (totalDataSize % frameSize);
+      const channelBuffer = new Uint16Array(
+        rawData.buffer,
+        channelOffset + frameOffset * 2,
+        dataSize * 2,
+      );
+
+      let col = cols[channel];
+      for (let i = 0; i < channelBuffer.length; i += 2) {
+        const yMin = channelBuffer[i];
+        const yMax = channelBuffer[i + 1];
+        let x = i + frame * frameSize;
+        for (let y = yMin; y <= yMax; y++) {
+          const pixelIndex = (y * width + x) * 4;
+
+          if (buffer.data[pixelIndex] == col[0]) col = cols[2];
+          buffer.data[pixelIndex] = col[0]; // Set the red channel value
+          buffer.data[pixelIndex + 1] = col[1]; // Set the green channel value
+          buffer.data[pixelIndex + 2] = col[2]; // Set the blue channel value
+          buffer.data[pixelIndex + 3] = 255; // Set the alpha channel value
+        }
+      }
+    }
+  }
+
+  return buffer;
+}
+
+function RawImageRenderer() {
+  const canvasRef = useRef(null);
+  const [imgSrc, setImgSrc] = useState(null);
+
+  const generateImageSource = (imageBuffer) => {
+    const { width, height, data } = imageBuffer;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    canvas.width = width;
+    canvas.height = height;
+
+    const imageData = context.createImageData(width, height);
+    imageData.data.set(data);
+
+    context.putImageData(imageData, 0, 0);
+    const dataURL = canvas.toDataURL("image/png");
+
+    return dataURL;
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+
+    canvas.width = 400; // Set the desired width
+    canvas.height = 300; // Set the desired height
+    context.fillStyle = "#FFFFFF"; // Set the desired background color
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
+  const processRawFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = new Uint16Array(reader.result);
+      const height = data[0];
+      const windowSize = data[1];
+      const samplesPerPixel = data[2];
+      const channelCount = data[3];
+      const frameCount = data[4];
+      // Process the raw data and generate the image source
+      const imageBuffer = createImageDataBuffer(
+        new Uint16Array(reader.result),
+        height,
+        windowSize / samplesPerPixel,
+        frameCount,
+        channelCount
+      );
+      const imageSrc = generateImageSource(imageBuffer);
+
+      // Set the image source to trigger rendering
+      setImgSrc(imageSrc);
+    };
+     reader.readAsArrayBuffer(file);
+  };
+
+  return (
+    <>
+      <input
+        type='file'
+        onChange={(evt) => {
+          const file = evt.target.files[0];
+          processRawFile(file);
+        }}
+      />
+      <img className='h-24 border border-4 border-red-500 p-4' src={imgSrc} alt='Raw Image' />
+      <canvas ref={canvasRef} className='bg-gradient-to-r from-gray-50 to-gray-100'/>
+    </>
+  );
+}
+
+const FileUpload = () => {
+  const [files, setFiles] = useContext(FilesContext);
+  const [uploading, setUploading] = useState(false);
+  const [store, setStore, refreshData] = useContext(StoreContext);
+
+  const handleFileInputChange = (event) => {
+    const files = Array.from(event.target.files);
+    const newFiles = files.reduce((obj, file) => {
+      obj[file.name] = {
+        file: file,
+        progress: 0
+      };
+      return obj;
+    }, {});
+    setFiles(newFiles);
+  };
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+
+    const pendingFilenames = [];
+
+    if (!Object.keys(files).length) {
+      alert("Please select a file to upload");
+      return;
+    }
+
+    setUploading(true);
+
+    for (let fileName in files) {
+      const file = files[fileName].file;
+      try {
+        const urlResponse = await axios.get(`https://${apiHost()}/upload?filename=${encodeURIComponent(file.name)}`, {
+          headers: {
+            Authorization: `Bearer ${apiToken()}`
+          }
+        });
+
+        const presignedUrl = urlResponse.data.url;
+
+        const uploadConfig = {
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setFiles((prevFiles) => ({
+              ...prevFiles,
+              [fileName]: {
+                ...prevFiles[fileName],
+                progress: percentCompleted
+              }
+            }));
+          }
+        };
+
+        await axios.put(presignedUrl, file, {
+          headers: {
+            "Content-Type": file.type
+          },
+          ...uploadConfig
+        });
+
+        pendingFilenames.push(file.name);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    setUploading(false);
+  };
+
+  return (
+    <div className=''>
+      <form onSubmit={handleFormSubmit} className=''>
+        <div className='p-4'>
+          <input
+            className='hidden' // Hide the default input
+            id='file-input' // Add an id to associate with the label
+            type='file'
+            onChange={handleFileInputChange}
+            multiple
+          />
+
+          {Object.keys(files).length ? (
+            <div className='flex flex-col items-center'>
+              <button
+                className='pl-4 pr-4 pt-1 pb-1 flex-shrink-0 bg-blue-500 hover:bg-blue-700 border-blue-500 hover:border-blue-700 text-sm border-4 text-white rounded'
+                type='submit'
+                disabled={!Object.keys(files).length}
+              >
+                Upload
+              </button>
+            </div>
+          ) : (
+            <div className='flex flex-col items-center'>
+              <label
+                htmlFor='file-input' // Associate the label with the input
+                className='cursor-pointer ml-4 pl-4 pr-4 pt-1 pb-1 flex-shrink-0 bg-blue-500 hover:bg-blue-700 border-blue-500 hover:border-blue-700 text-sm border-4 text-white rounded'
+              >
+                Select audio
+              </label>
+              <p className='text-gray-500 mt-4'>
+                You can select any audio files but <em>.wav</em> or <em>.aiff</em> are recommended
+              </p>
+            </div>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+};
+
+function Uploads() {
+  const [files, setFiles] = useContext(FilesContext);
+
+  return (
+    <div className='p-4'>
+      {Object.keys(files).length ? (
+        <div className='space-y-4'>
+          {Object.keys(files).map((fileName, index) => (
+            <div key={index} className='w-full flex flex-col md:flex-row'>
+              <div className='text-xs w-full w-3/4 pr-2'>{fileName}</div>
+              <div className='w-full w-1/4'>
+                {files[fileName].progress < 100 ? (
+                  <div className='w-md bg-gray-200 rounded-full h-3 dark:bg-gray-700 mt-2'>
+                    <div
+                      className='bg-blue-600 h-3 rounded-full transition-all ease-out duration-500'
+                      style={{ width: `${files[fileName].progress}%` }}
+                    ></div>
+                  </div>
+                ) : (
+                  <></>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <></>
+      )}
+    </div>
+  );
+}
+
+const FilesContext = createContext();
+
+const FilesProvider = ({ children }) => {
+  const [files, setFiles] = useState([]);
+  return <FilesContext.Provider value={[files, setFiles]}>{children}</FilesContext.Provider>;
+};
+
+function Tasks({ task }) {
+  return (
+    <div className='m-4 bg-gray-50'>
+      {task === "upload" && (
+        <>
+          <Uploads />
+          <FileUpload />
+        </>
+      )}
+    </div>
+  );
+}
+
+let audioCtx = new AudioContext();
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [jwt, setJwt] = useState(null);
+  const [task, setTask] = useState(null);
+  const [theme, setTheme] = useState("channel");
+  const [mode, setMode] = useState("separate");
+  const [soundId, setSoundId] = useState(null);
+
+  const audioManager = AudioManager();
+
+  return (
+    <div className='flex min-h-screen flex-col w-full'>
+      <StoreProvider>
+        <main className='flex flex-1 flex-col w-full'>
+          <header className='border-b border-1 bg-white hidden' style={{ borderColor: "#ff04c7" }}>
+            <div className='w-full px-4 container flex h-16 items-center'>
+              <div className='flex flex-1 items-start'>
+                <div className='flex-shrink-0 rounded bg-gradient-to-r from-slate-800 via-slate-950 to-slate-700'>
+                  <a className='flex flex-none items-start' href='/'>
+                    <img alt='logo' className='w-14' src='/wavey.png' />
+                  </a>
+                </div>
+                <span className='text-sm p-4 font-semibold' style={{ color: "#ff04c7" }}>
+                  wavey<span className='text-slate-800'>.ai</span>
+                </span>
+                <div className='hidden relative ml-4 mt-2 flex-1 lg:max-w-sm mr-2 sm:mr-4 lg:mr-6'>
+                  <input
+                    autoComplete='off'
+                    className='w-md dark:bg-gray-950 pl-8 border rounded h-9 pr-3 border-zinc-300'
+                    name=''
+                    placeholder='Search...'
+                    spellCheck='false'
+                    type='text'
+                  />
+                  <svg
+                    className='absolute left-2.5 text-gray-400 top-1/2 transform -translate-y-1/2'
+                    aria-hidden='true'
+                    focusable='false'
+                    role='img'
+                    width='1em'
+                    height='1em'
+                    viewBox='0 0 32 32'
+                  >
+                    <path
+                      d='M30 28.59L22.45 21A11 11 0 1 0 21 22.45L28.59 30zM5 14a9 9 0 1 1 9 9a9 9 0 0 1-9-9z'
+                      fill='currentColor'
+                    ></path>
+                  </svg>
+                </div>
+              </div>
+              <nav className='flex items-start flex-1 hidden sm:block'>
+                <ul className='flex space-x-8 text-base font-semibold'>
+                  <li className=''>
+                    <a
+                      className='flex items-start text-zinc-100 px-2 py-0.5 dark:hover:text-gray-400 hover:text-sky-600'
+                      href='/'
+                    >
+                      sounds
+                    </a>
+                  </li>
+                </ul>
+              </nav>
+              <nav className='flex items-end '>
+                <ul className='flex space-x-2'>
+                  <li>{user ? <LogoutButton domain={domain} /> : <p></p>}</li>
+                </ul>
+              </nav>
+            </div>
+          </header>
+          <FilesProvider>
+            <div className='bg-gray-50 flex p-4'>
+              <div className='flex flex-row sm:flex-row'>
+                <section className='text-sm w-full sm:w-80 flex-row border-gray-100 bg-white lg:border-r lg:bg-gradient-to-l from-gray-50 to-white font-mono'>
+                  <div className='mb-3'>
+                    <div className=' text-indigo-600'>
+                      <a
+                        className='mr-2 flex items-center hover:text-pink-400 rounded-md bg-white text-xs pr-2'
+                        href='#'
+                        onClick={() => {
+                          setTask("upload");
+                        }}
+                      >
+                        <div className='relative p-1'>
+                          <div className='absolute z-0 inset-0 bg-gradient-to-b from-gray-100 to-blue-100' />
+                          <svg
+                            xmlns='http://www.w3.org/2000/svg'
+                            fill='none'
+                            viewBox='0 0 24 24'
+                            strokeWidth={0.5}
+                            stroke='currentColor'
+                            className='w-4 h-4 relative'
+                          >
+                            <path
+                              strokeLinecap='round'
+                              strokeLinejoin='round'
+                              d='M7.5 7.5h-.75A2.25 2.25 0 004.5 9.75v7.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-.75m0-3l-3-3m0 0l-3 3m3-3v11.25m6-2.25h.75a2.25 2.25 0 012.25 2.25v7.5a2.25 2.25 0 01-2.25 2.25h-7.5a2.25 2.25 0 01-2.25-2.25v-.75'
+                            />
+                          </svg>
+                        </div>
+                        <span className='ml-2 text-slate-900'>Upload Sounds</span>
+                      </a>
+                      <a
+                        className='mt-2 mr-2 flex items-center hover:text-pink-400 rounded-md bg-white text-xs pr-2'
+                        href='#'
+                        onClick={() => {
+                          setTask("tag");
+                        }}
+                      >
+                        <div className='relative p-1'>
+                          <div className='absolute z-0 inset-0 bg-gradient-to-b from-gray-100 to-blue-100' />
+                          <svg
+                            xmlns='http://www.w3.org/2000/svg'
+                            fill='none'
+                            viewBox='0 0 24 24'
+                            strokeWidth={0.5}
+                            stroke='currentColor'
+                            className='w-4 h-4 relative'
+                          >
+                            <path
+                              strokeLinecap='round'
+                              strokeLinejoin='round'
+                              d='M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z'
+                            />
+                            <path strokeLinecap='round' strokeLinejoin='round' d='M6 6h.008v.008H6V6z' />
+                          </svg>
+                        </div>
+                        <span className='ml-2 text-slate-900'>Tag Tracks</span>
+                      </a>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className='w-full sm:flex-1 bg-zinc-100'>
+              <RawImageRenderer />
+              <Tasks task={task} />
+              <Sounds theme={theme} mode={mode} audioManager={audioManager} />
+            </div>
+          </FilesProvider>
+        </main>
+      </StoreProvider>
+    </div>
+  );
+}

@@ -1,0 +1,1597 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Timeout: 15
+
+Parameters:
+  PipelineOnly:
+    Type: String
+    Default: No
+  BootstrapBucket:
+    Type: String
+    Default: bootstrap-pipeline
+
+  CodeStarConnectionArn:
+    Type: String
+  RepositoryId:
+    Type: String
+  BranchName:
+    Type: String
+
+  StageName:
+    Type: String
+  Certificate:
+    Type: String
+  DomainName:
+    Type: String
+
+  HostedZoneId:
+    Type: String
+  UploadsPrefix:
+    Type: String
+
+  ApiSubdomain:
+    Type: String
+    Default: api
+  AppSubdomain:
+    Type: String
+    Default: app
+  ExploreSubdomain:
+    Type: String
+    Default: www
+  WsSubdomain:
+    Type: String
+    Default: ws
+  SoundsSubdomain:
+    Type: String
+    Default: stream
+  OidcSubdomain:
+    Type: String
+    Default: sso
+
+  UploadsTableName:
+    Type: String
+    Default: uploads
+  ClipsTableName:
+    Type: String
+    Default: clips
+  FormatsTableName:
+    Type: String
+    Default: formats
+
+Conditions:
+  IsProd: !Equals [ !Ref StageName, 'live' ]
+  CreateResource: !Equals [ !Ref PipelineOnly, 'No' ]
+  CreateGlobal: !And [!Equals [!Ref AWS::Region, 'us-east-1'], !Condition CreateResource]
+Resources:
+  UploadsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Condition: CreateGlobal
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub ${StageName}_${UploadsTableName}
+      AttributeDefinitions:
+        - AttributeName: user
+          AttributeType: S
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+        - AttributeName: user
+          KeyType: RANGE
+  FormatsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Condition: CreateGlobal
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub ${StageName}_${FormatsTableName}
+      AttributeDefinitions:
+        - AttributeName: user
+          AttributeType: S
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user
+          KeyType: HASH
+        - AttributeName: key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GlobalIndex
+          KeySchema:
+            - AttributeName: user
+              KeyType: HASH
+            - AttributeName: key
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+  ClipsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Condition: CreateGlobal
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub ${StageName}_${ClipsTableName}
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+        - AttributeName: sound
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: soundIndex
+          KeySchema:
+            - AttributeName: sound
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GlobalIndex
+          KeySchema:
+            - AttributeName: key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ExploreBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateGlobal
+
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateGlobal
+
+  AccessLogs:
+    Type: AWS::Logs::LogGroup
+
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+
+  AppBucketReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateGlobal
+    Properties:
+      Bucket: !Ref AppBucket
+      PolicyDocument:
+       Statement:
+       - Action: 's3:GetObject'
+         Effect: Allow
+         Resource: !Sub 'arn:aws:s3:::${AppBucket}/*'
+         Principal:
+           CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+
+  AppDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: CreateGlobal
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Sub
+            - '${Subdomain}.${Domain}'
+            - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+              Domain: !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+        Logging:
+          Bucket: !GetAtt LoggingBucket.DomainName
+          IncludeCookies : true
+          Prefix: "app-cloudfront/"
+        Enabled: true
+        Origins:
+        - DomainName: !GetAtt AppBucket.DomainName
+          Id: myS3Origin
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        Comment: Amazon CloudFront Distribution Secured by OIDC
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # disabled
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # all sans host
+          TargetOriginId: myS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          LambdaFunctionAssociations:
+            -
+              EventType: viewer-request
+              LambdaFunctionARN: !Ref EdgeAppAuth.Version
+          ForwardedValues:
+            QueryString: 'true'
+            Headers:
+              - '*'
+            Cookies:
+              Forward: 'all'
+          MinTTL: 0
+          MaxTTL: 0
+          DefaultTTL: 0
+
+  EdgeAppAuth:
+    Type: AWS::Serverless::Function
+    Condition: CreateGlobal
+    Properties:
+      Role: !GetAtt EdgeAppAuthRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/test-auth-token/function.zip
+      Runtime: nodejs14.x
+      Handler: main.handler
+      Timeout: 5
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  EdgeAppAuthRole:
+    Type: AWS::IAM::Role
+    Condition: CreateGlobal
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+                - 'edgelambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EdgeAppAuthPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+  EdgeSoundsAuth:
+    Type: AWS::Serverless::Function
+    Condition: CreateResource
+    Properties:
+      Role: !GetAtt EdgeSoundsAuthRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/test-auth-token/function.zip
+      Runtime: nodejs14.x
+      Handler: main.handler
+      Timeout: 5
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  EdgeSoundsAuthRole:
+    Type: AWS::IAM::Role
+    Condition: CreateResource
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+                - 'edgelambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EdgeSoundsAuthPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+  ExploreBucketReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateGlobal
+    Properties:
+      Bucket: !Ref ExploreBucket
+      PolicyDocument:
+       Statement:
+       - Action: 's3:GetObject'
+         Effect: Allow
+         Resource: !Sub 'arn:aws:s3:::${ExploreBucket}/*'
+         Principal:
+           CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Condition: CreateResource
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Ref AWS::StackName
+
+  ExploreDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: CreateGlobal
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Sub
+            - "${Subdomain}.${Domain}"
+            - Subdomain: !If [IsProd, !Ref ExploreSubdomain, !Sub '${StageName}-${ExploreSubdomain}']
+              Domain: !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+        Logging:
+          Bucket: !GetAtt LoggingBucket.DomainName
+          IncludeCookies : false
+          Prefix: "marketing-cloudfront/"
+        Enabled: true
+        Origins:
+        - DomainName: !GetAtt ExploreBucket.DomainName
+          Id: myS3Origin
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # disabled
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf # cors
+          TargetOriginId: myS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: 'true'
+            Headers:
+              - '*'
+            Cookies:
+              Forward: 'all'
+
+  Route53ExploreSubdomainAliasRecord:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: CreateGlobal
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub
+        - "${Subdomain}.${Domain}"
+        - Subdomain: !If [IsProd, !Ref ExploreSubdomain, !Sub '${StageName}-${ExploreSubdomain}']
+          Domain: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2 # This is a fixed value for CloudFront distributions
+        DNSName: !GetAtt ExploreDistribution.DomainName
+
+  Route53AppSubdomainAliasRecord:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: CreateGlobal
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub
+        - "${Subdomain}.${Domain}"
+        - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+          Domain: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2 # This is a fixed value for CloudFront distributions
+        DNSName: !GetAtt AppDistribution.DomainName
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: CreateResource
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UserPoolName: !Ref AWS::StackName
+      UsernameAttributes:
+        - email
+      Schema:
+        - AttributeDataType: String
+          Name: name
+          Mutable: true
+          Required: false
+
+  AppleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: CreateResource
+    Properties:
+      ProviderName: SignInWithApple
+      ProviderType: SignInWithApple
+      UserPoolId: !Ref UserPool
+      AttributeMapping:
+        name: name
+        email: email
+        sub: username
+      ProviderDetails:
+        client_id: !Sub
+          - '{{resolve:secretsmanager:${SecretId}:SecretString:apple_client_id}}'
+          - SecretId: !Sub ${AWS::StackName}-oidc
+        team_id: !Sub
+          - '{{resolve:secretsmanager:${SecretId}:SecretString:apple_team_id}}'
+          - SecretId: !Sub ${AWS::StackName}-oidc
+        key_id: !Sub
+          - '{{resolve:secretsmanager:${SecretId}:SecretString:apple_key_id}}'
+          - SecretId: !Sub ${AWS::StackName}-oidc
+        private_key: !Sub
+          - '{{resolve:secretsmanager:${SecretId}:SecretString:apple_private_key}}'
+          - SecretId: !Sub ${AWS::StackName}-oidc
+        authorize_scopes: "name email"
+
+          #  GoogleIdentityProvider:
+          #    DependsOn: PipelineRole
+          #    Type: AWS::Cognito::UserPoolIdentityProvider
+          #    Properties:
+          #      ProviderName: Google
+          #      ProviderType: Google
+          #      UserPoolId: !Ref UserPool
+          #      AttributeMapping:
+          #        email: email
+          #        name: name
+          #      ProviderDetails:
+          #        client_id: !Sub
+          #          - '{{resolve:secretsmanager:${SecretId}:SecretString:google_client_id}}'
+          #          - SecretId: !Sub ${AWS::StackName}-oidc
+          #        client_secret: !Sub
+          #          - '{{resolve:secretsmanager:${SecretId}:SecretString:google_client_secret}}'
+          #          - SecretId: !Sub ${AWS::StackName}-oidc
+          #        authorize_scopes: "email openid profile"
+
+  UserPoolClient:
+    Condition: CreateResource
+    DependsOn: AppleIdentityProvider
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Ref AWS::StackName
+      UserPoolId: !Ref UserPool
+      GenerateSecret: true
+      AccessTokenValidity: 24
+      IdTokenValidity: 24
+      RefreshTokenValidity: 24
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: hours
+      SupportedIdentityProviders:
+        - COGNITO
+        - SignInWithApple
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - email
+        - openid
+      CallbackURLs:
+        - !Sub
+          - "https://${Subdomain}.${Domain}"
+          - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+            Domain: !Ref DomainName
+      LogoutURLs:
+        - !Sub
+            - "https://${Subdomain}.${Domain}/_logout"
+            - Subdomain: !If [IsProd, 'sso', !Sub '${StageName}-sso']
+              Domain: !Ref DomainName
+
+  UserPoolDomain:
+    Condition: CreateResource
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain:
+        !Sub
+          - '${Subdomain}-${Region}.${Domain}'
+          - Subdomain: !Sub '${StageName}-${OidcSubdomain}'
+            Domain: !Ref DomainName
+            Region: !Ref AWS::Region
+      CustomDomainConfig:
+        CertificateArn: !Ref Certificate
+
+  Route53OidcRecord:
+    Condition: CreateResource
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name:
+        !Sub
+          - '${Subdomain}-${Region}.${Domain}'
+          - Subdomain: !Sub '${StageName}-${OidcSubdomain}'
+            Domain: !Ref DomainName
+            Region: !Ref AWS::Region
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2 # fixed value for CloudFront
+        DNSName: !GetAtt UserPoolDomain.CloudFrontDistribution
+
+  SoundsBucket:
+    Condition: CreateResource
+    DependsOn: PngQueuePolicy
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt PngQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: "png/"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+            - "*"
+            AllowedMethods:
+            - GET
+            AllowedOrigins:
+            - !Sub
+              - "https://${Subdomain}.${Domain}"
+              - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+                Domain: !Ref DomainName
+            - http://localhost:8181
+
+  UploadsBucketQueuePolicy:
+    Condition: CreateResource
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "s3.amazonaws.com"
+            Action: 'SQS:SendMessage'
+            Resource: !GetAtt UploadsBucketQueue.Arn
+      Queues:
+        - !Ref UploadsBucketQueue
+
+  UploadsBucket:
+    Condition: CreateResource
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt UploadsBucketQueue.Arn
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+            - "*"
+          AllowedMethods:
+            - PUT
+          AllowedOrigins:
+            - !Sub
+              - "https://${Subdomain}.${Domain}"
+              - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+                Domain: !Ref DomainName
+            - "http://localhost:8181"
+
+  UploadsBucketQueue:
+    Condition: CreateResource
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-uploads
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        maxReceiveCount: 1
+        deadLetterTargetArn: !GetAtt UploadsDLQ.Arn
+
+  UploadsDLQ:
+    Condition: CreateResource
+    Type: "AWS::SQS::Queue"
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-uploads-dlq
+
+  LambdaRole:
+    Condition: CreateResource
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBReadWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                Resource:
+                  - '*'
+        - PolicyName: S3SoundsBucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub arn:aws:s3:::${SoundsBucket}
+                  - !Sub arn:aws:s3:::${SoundsBucket}/*
+        - PolicyName: S3UploadsBucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub arn:aws:s3:::${UploadsBucket}
+                  - !Sub arn:aws:s3:::${UploadsBucket}/*
+        - PolicyName: SQSRecMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt UploadsBucketQueue.Arn
+        - PolicyName: SQSSendMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt UploadsDLQ.Arn
+        - PolicyName: SNSPublishMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref UploadsSnsTopic
+        - PolicyName: PngQueueRecMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt PngQueue.Arn
+        - PolicyName: PngQueueSendMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt PngDLQ.Arn
+
+  LambdaUploadsSQSPermission:
+    Condition: CreateResource
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt LambdaUploadsFunction.Arn
+      Principal: "sqs.amazonaws.com"
+      SourceArn: !GetAtt UploadsBucketQueue.Arn
+
+  UploadsBucketEventSourceMapping:
+    Condition: CreateResource
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt UploadsBucketQueue.Arn
+      FunctionName: !GetAtt LambdaUploadsFunction.Arn
+      Enabled: true
+      BatchSize: 10
+
+  LambdaUploadsFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/sounds-uploads-lambda:latest
+      PackageType: Image
+      MemorySize: 10240
+      Timeout: 890
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt UploadsDLQ.Arn
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref UploadsSnsTopic
+          SOUNDS_BUCKET: !Ref SoundsBucket
+          UPLOADS_TABLE_NAME: !Sub ${StageName}_${UploadsTableName}
+          FORMATS_TABLE_NAME: !Sub ${StageName}_${FormatsTableName}
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  LambdaPngSQSPermission:
+    Condition: CreateResource
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt LambdaPngFunction.Arn
+      Principal: "sqs.amazonaws.com"
+      SourceArn: !GetAtt PngQueue.Arn
+
+  SoundsBucketPngEventSourceMapping:
+    Condition: CreateResource
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt PngQueue.Arn
+      FunctionName: !GetAtt LambdaPngFunction.Arn
+      Enabled: true
+      BatchSize: 10
+
+  LambdaPngFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/pngquant-lambda:448aa71ffd4bb218383877f1d08757f9
+      PackageType: Image
+      MemorySize: 2048
+      Timeout: 590
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt PngDLQ.Arn
+      Environment:
+        Variables:
+          SOUNDS_BUCKET: !Ref SoundsBucket
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  PngQueue:
+    Condition: CreateResource
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-png
+      VisibilityTimeout: 600
+      RedrivePolicy:
+        maxReceiveCount: 1
+        deadLetterTargetArn: !GetAtt PngDLQ.Arn
+
+  PngDLQ:
+    Condition: CreateResource
+    Type: "AWS::SQS::Queue"
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-png-dlq
+
+  PngQueuePolicy:
+    Condition: CreateResource
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "s3.amazonaws.com"
+            Action: 'SQS:SendMessage'
+            Resource: !GetAtt PngQueue.Arn
+      Queues:
+        - !Ref PngQueue
+
+  HttpApiGetUploadFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/get-upload/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${StageName}_${UploadsTableName}
+          BUCKET_NAME: !Ref UploadsBucket
+          UPLOADS_PREFIX: !Ref UploadsPrefix
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /upload
+            TimeoutInMillis: 3000
+            PayloadFormatVersion: "2.0"
+            RouteSettings:
+              ThrottlingBurstLimit: 600
+          Version: 2.0
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  HttpApiGetSoundsFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/get-sounds/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${StageName}_${FormatsTableName}
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /sounds
+            TimeoutInMillis: 3000
+            PayloadFormatVersion: "2.0"
+            RouteSettings:
+              ThrottlingBurstLimit: 600
+          Version: 2.0
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  HttpApiCreateClipsFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/create-clips/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${StageName}_${ClipsTableName}
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /clips
+            TimeoutInMillis: 3000
+            PayloadFormatVersion: "2.0"
+            RouteSettings:
+              ThrottlingBurstLimit: 600
+          Version: 2.0
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  HttpApiGetClipsFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/get-clips/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Sub ${StageName}_${ClipsTableName}
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /clips/{soundId}
+            TimeoutInMillis: 3000
+            PayloadFormatVersion: "2.0"
+            RouteSettings:
+              ThrottlingBurstLimit: 600
+          Version: 2.0
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+
+  HttpApi:
+    Condition: CreateResource
+    Type: AWS::Serverless::HttpApi
+    DependsOn: UserPool
+    Properties:
+      Auth:
+        Authorizers:
+          MyAuthorizer:
+            JwtConfiguration:
+              Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              Audience:
+                - !Ref UserPoolClient
+            IdentitySource: "$request.header.Authorization"
+        DefaultAuthorizer: MyAuthorizer
+      StageName: !Ref StageName
+      AccessLogSettings:
+        DestinationArn: !GetAtt AccessLogs.Arn
+        Format: $context.requestId
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 200
+      StageVariables:
+        StageVar: Value
+      FailOnWarnings: true
+      Domain:
+        DomainName: !Sub
+          - "${Subdomain}-${Region}.${Domain}"
+          - Subdomain: !Sub ${StageName}-${ApiSubdomain}
+            Domain: !Ref DomainName
+            Region: !Ref AWS::Region
+        CertificateArn: !Ref Certificate
+        EndpointConfiguration: REGIONAL
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub
+            - "https://${Subdomain}.${Domain}"
+            - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+              Domain: !Ref DomainName
+          - !Sub
+            - "https://${Subdomain}.${Domain}"
+            - Subdomain: !If [IsProd, !Ref ApiSubdomain, !Sub '${StageName}-${ApiSubdomain}']
+              Domain: !Ref DomainName
+          - !Sub http://localhost:8181
+        AllowHeaders:
+          - 'Authorization'
+          - 'Content-Type'
+          - 'X-Requested-With'
+          - 'Accept'
+        AllowMethods:
+          - 'GET'
+          - 'PUT'
+          - 'POST'
+          - 'DELETE'
+          - 'OPTIONS'
+        MaxAge: 300
+
+  SoundsBucketReadPolicy:
+    Condition: CreateResource
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SoundsBucket
+      PolicyDocument:
+       Statement:
+       - Action: 's3:GetObject'
+         Effect: Allow
+         Resource: !Sub 'arn:aws:s3:::${SoundsBucket}/*'
+         Principal:
+           CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+
+  SoundsDistribution:
+    Condition: CreateResource
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Sub
+            - "${Subdomain}-${Region}.${Domain}"
+            - Subdomain: !Sub ${StageName}-${SoundsSubdomain}
+              Domain: !Ref DomainName
+              Region: !Ref AWS::Region
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+        Logging:
+          Bucket: !GetAtt LoggingBucket.DomainName
+          IncludeCookies : true
+          Prefix: "app-cloudfront/"
+        Enabled: true
+        Origins:
+        - DomainName: !GetAtt SoundsBucket.DomainName
+          Id: myS3Origin
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        Comment: Amazon CloudFront Distribution Secured by OIDC
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: !Ref SoundsCachePolicy
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf # cors
+          ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+          TargetOriginId: myS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          LambdaFunctionAssociations:
+            -
+              EventType: viewer-request
+              LambdaFunctionARN: !Ref EdgeSoundsAuth.Version
+          ForwardedValues:
+            QueryString: 'true'
+            Headers:
+              - '*'
+            Cookies:
+              Forward: 'all'
+
+  SoundsCachePolicy:
+    Condition: CreateResource
+    Type: 'AWS::CloudFront::CachePolicy'
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub ${AWS::StackName}-Custom-Cache-Policy-With-Range
+        MinTTL: 1
+        MaxTTL: 31536000
+        DefaultTTL: 86400
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - 'Range'
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          EnableAcceptEncodingGzip: true
+        Comment: Cache policy with Range header included in cache key
+
+  ResponseHeadersPolicy:
+    Condition: CreateResource
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-security-response-headers-policy
+        CorsConfig:
+          AccessControlAllowCredentials: true
+          AccessControlAllowHeaders:
+            Items:
+              - 'Range'
+              - 'Origin'
+              - 'Authorization'
+              - 'If-Range'
+              - 'If-Match'
+              - 'If-None-Match'
+              - 'If-Modified-Since'
+              - 'Cookie'
+              - 'Referer'
+              - 'Accept'
+              - 'Accept-Encoding'
+              - 'Accept-Ranges'
+          AccessControlAllowMethods:
+            Items:
+              - ALL
+          AccessControlAllowOrigins:
+            Items:
+              - !Sub
+                - '${Subdomain}.${Domain}'
+                - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
+                  Domain: !Ref DomainName
+              - 'http://localhost:8181'
+          OriginOverride: true
+
+  Route53SoundsSubdomainAliasRecord:
+    Condition: CreateResource
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub
+        - "${Subdomain}-${Region}.${Domain}"
+        - Subdomain: !Sub ${StageName}-${SoundsSubdomain}
+          Domain: !Ref DomainName
+          Region: !Ref AWS::Region
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2 # This is a fixed value for CloudFront distributions
+        DNSName: !GetAtt SoundsDistribution.DomainName
+
+  WebsocketDynamoDBTable:
+    Condition: CreateResource
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub ${AWS::StackName}_ws_connections
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+        - AttributeName: topic
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+        - AttributeName: topic
+          KeyType: RANGE
+
+  WebSocketApi:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Api'
+    Properties:
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+      Name: !Sub ${AWS::StackName}-ws-api
+
+  WebSocketApiStage:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Stage'
+    Properties:
+      StageName: !Ref StageName
+      ApiId: !Ref WebSocketApi
+      AutoDeploy: true
+
+  WebSocketDomainName:
+    Condition: CreateResource
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub
+        - "${Subdomain}-${Region}.${Domain}"
+        - Subdomain: !Sub ${StageName}-${WsSubdomain}
+          Domain: !Ref DomainName
+          Region: !Ref AWS::Region
+      DomainNameConfigurations:
+        - CertificateArn: !Ref Certificate
+
+  WebSocketApiMapping:
+    Condition: CreateResource
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref WebSocketApi
+      ApiMappingKey: String
+      DomainName: !Ref WebSocketDomainName
+      Stage: !Ref WebSocketApiStage
+
+  WsDomainRecordSet:
+    Condition: CreateResource
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref WebSocketDomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt WebSocketDomainName.RegionalHostedZoneId
+        DNSName: !GetAtt WebSocketDomainName.RegionalDomainName
+
+  WsConnectRoute:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      Target: !Sub "integrations/${WebsocketIntegration}"
+
+  WsDisconnectRoute:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      Target: !Sub "integrations/${WebsocketIntegration}"
+
+  WsDefaultRoute:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $default
+      Target: !Sub "integrations/${WebsocketIntegration}"
+
+  WsSubscribeRoute:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Route'
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: subscribe
+      Target: !Sub "integrations/${WebsocketIntegration}"
+
+  WsApiDeployment:
+    Condition: CreateResource
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn: WsConnectRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref StageName
+
+  UploadsSnsTopic:
+    Condition: CreateResource
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-uploads
+
+  WebsocketSubFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/ws-sub/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WebsocketDynamoDBTable
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebsocketDynamoDBTable
+
+  WebsocketPubFunction:
+    Condition: CreateResource
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/ws-pub/function.zip
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WebsocketDynamoDBTable
+      AutoPublishAlias: LIVE
+      DeploymentPreference:
+        Enabled: true
+        Type: AllAtOnce
+      Events:
+        UploadSnsEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref UploadsSnsTopic
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebsocketDynamoDBTable
+        - Statement:
+          - Effect: "Allow"
+            Action:
+              - "execute-api:ManageConnections"
+            Resource: "*"
+
+  WebsocketIntegration:
+    Condition: CreateResource
+    Type: 'AWS::ApiGatewayV2::Integration'
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri:
+        Fn::Sub:
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - LambdaArn: !GetAtt WebsocketSubFunction.Arn
+
+  BuildBucket:
+    Type: AWS::S3::Bucket
+
+  DeployBucket:
+    Type: AWS::S3::Bucket
+
+  Pipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref BuildBucket
+      Name: !Sub ${AWS::StackName}
+      RoleArn: !GetAtt PipelineRole.Arn
+      Stages:
+        - Name: source
+          Actions:
+            - Name: github
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                BranchName: !Ref BranchName
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Region: !Ref AWS::Region
+              RunOrder: 1
+        - Name: build
+          Actions:
+            - Name: !Sub ${AWS::StackName}-build
+              Configuration:
+                ProjectName: !Sub ${AWS::StackName}-build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: explore
+                - Name: app
+                - Name: functions
+                - Name: templates
+              Region: !Ref AWS::Region
+              RunOrder: 1
+        - Name: s3-uploads
+          Actions:
+            - Name: cloudfront-explore
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              RunOrder: 1
+              Configuration:
+                BucketName: !If [CreateGlobal, !Ref ExploreBucket, !Ref BootstrapBucket]
+                Extract: "true"
+              InputArtifacts:
+                - Name: explore
+              Region: !Ref AWS::Region
+            - Name: cloudfront-app
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              RunOrder: 1
+              Configuration:
+                BucketName: !If [CreateGlobal, !Ref AppBucket, !Ref BootstrapBucket]
+                Extract: "true"
+              InputArtifacts:
+                - Name: app
+              Region: !Ref AWS::Region
+            - Name: lambdas-upload
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              RunOrder: 1
+              Configuration:
+                BucketName: !Ref DeployBucket
+                Extract: "true"
+              InputArtifacts:
+                - Name: functions
+              Region: !Ref AWS::Region
+        - Name: prep-changesets
+          Actions:
+            - Name: api
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: '1'
+              RunOrder: 5
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                ChangeSetName: !Sub ${AWS::StackName}-changeset
+                RoleArn: !GetAtt [PipelineRole, Arn]
+                StackName: !Ref AWS::StackName
+                TemplatePath: 'templates::template.yml'
+                ParameterOverrides: !Sub |
+                  {
+                    "PipelineOnly": "No",
+                    "StageName" : "${StageName}",
+                    "Certificate" : "${Certificate}",
+                    "DomainName" : "${DomainName}",
+                    "HostedZoneId" : "${HostedZoneId}",
+                    "UploadsPrefix": "${UploadsPrefix}",
+                    "CodeStarConnectionArn": "${CodeStarConnectionArn}",
+                    "RepositoryId": "${RepositoryId}",
+                    "BranchName": "${BranchName}"
+                  }
+              OutputArtifacts: []
+              InputArtifacts:
+                - Name: templates
+        - Name: exec-changesets
+          Actions:
+            - Name: api
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: '1'
+              RunOrder: 5
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                ChangeSetName: !Sub ${AWS::StackName}-changeset
+                RoleArn: !GetAtt [PipelineRole, Arn]
+                StackName: !Ref AWS::StackName
+                TemplatePath: 'templates::template.yml'
+                ParameterOverrides: !Sub |
+                  {
+                    "PipelineOnly": "No",
+                    "StageName" : "${StageName}",
+                    "Certificate" : "${Certificate}",
+                    "DomainName" : "${DomainName}",
+                    "HostedZoneId" : "${HostedZoneId}",
+                    "UploadsPrefix": "${UploadsPrefix}",
+                    "CodeStarConnectionArn": "${CodeStarConnectionArn}",
+                    "RepositoryId": "${RepositoryId}",
+                    "BranchName": "${BranchName}"
+                  }
+              OutputArtifacts: []
+              InputArtifacts:
+                - Name: templates
+
+  CodeBuildProject:
+    Type: "AWS::CodeBuild::Project"
+    Properties:
+      Name: !Sub ${AWS::StackName}-build
+      Artifacts:
+        Name: !Ref AWS::StackName
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: "aws/codebuild/amazonlinux2-x86_64-standard:4.0"
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ARTIFACTS_BUCKET
+            Value: !Ref DeployBucket
+          - Name: APP_BUCKET
+            Value: !If [CreateGlobal, !Ref AppBucket, !Ref BootstrapBucket]
+          - Name: EXPLORE_BUCKET
+            Value: !If [CreateGlobal, !Ref ExploreBucket, !Ref BootstrapBucket]
+          - Name: UPLOADS_BUCKET
+            Value: !If [CreateResource, !Ref UploadsBucket, !Ref BootstrapBucket]
+          - Name: SOUNDS_BUCKET
+            Value: !If [CreateResource, !Ref SoundsBucket, !Ref BootstrapBucket]
+          - Name: USER_POOL_ID
+            Value: !If [CreateResource, !Ref UserPool, 'foo']
+          - Name: USER_POOL_APP_ID
+            Value: !If [CreateResource, !Ref UserPoolClient, 'foo']
+          - Name: USER_POOL_DOMAIN
+            Value: !Sub
+              - '${Subdomain}-${Region}.${Domain}'
+              - Subdomain: !Sub '${StageName}-${OidcSubdomain}'
+                Domain: !Ref DomainName
+                Region: !Ref AWS::Region
+          - Name: USER_POOL_APP_SECRET
+            Value: !Sub
+              - '{{resolve:secretsmanager:${SecretId}:SecretString:user_pool_app_secret}}'
+              - SecretId: !Sub ${AWS::StackName}-oidc
+
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      QueuedTimeoutInMinutes: 5
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 20
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_DOCKER_LAYER_CACHE
+          - LOCAL_SOURCE_CACHE
+
+  CodeBuildRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Action: "sts:AssumeRole"
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-CodeBuildAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cloudformation:*"
+                  - "cloudwatch:*"
+                  - "codebuild:*"
+                  - "codedeploy:*"
+                  - "ec2:*"
+                  - "ecr-public:*"
+                  - "ecr:*"
+                  - "events:*"
+                  - "iam:AttachRolePolicy"
+                  - "iam:CreatePolicy"
+                  - "iam:CreateRole"
+                  - "iam:DetachRolePolicy"
+                  - "iam:GetRole"
+                  - "iam:PassRole"
+                  - "iam:PutRolePolicy"
+                  - "lambda:*"
+                  - "logs:*"
+                  - "s3:*"
+                  - "secretsmanager:*"
+                  - "sns:Publish"
+                  - "sts:*"
+                Resource: "*"
+      RoleName: !Sub ${AWS::StackName}-codebuild
+
+  PipelineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-CodePipelineAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "apigateway:*"
+                  - "cloudformation:*"
+                  - "codebuild:*"
+                  - "codedeploy:*"
+                  - "codepipeline:*"
+                  - "cognito-idp:*"
+                  - "cloudfront:*"
+                  - "dynamodb:*"
+                  - "ec2:*"
+                  - "ecr:*"
+                  - "events:*"
+                  - "iam:AttachRolePolicy"
+                  - "iam:CreatePolicy"
+                  - "iam:CreateRole"
+                  - "iam:DeleteRole"
+                  - "iam:DeleteRolePolicy"
+                  - "iam:DetachRolePolicy"
+                  - "iam:GetRole"
+                  - "iam:GetRolePolicy"
+                  - "iam:PassRole"
+                  - "iam:PutRolePolicy"
+                  - "lambda:*"
+                  - "logs:*"
+                  - "route53:*"
+                  - "s3:*"
+                  - "sqs:*"
+                  - "sns:*"
+                Resource: "*"
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-oidc-*'
+              - Effect: Allow
+                Action:
+                  - "codestar-connections:UseConnection"
+                  - "codestar-connections:PassConnection"
+                Resource: !Ref CodeStarConnectionArn
+      RoleName: !Sub ${AWS::StackName}-pipelinerole
