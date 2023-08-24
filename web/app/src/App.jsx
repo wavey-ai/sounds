@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useLayoutEffect } from "react";
 
 import jwt_decode from "jwt-decode";
 import axios from "axios";
@@ -8,168 +8,124 @@ import { apiHost, apiToken } from "./Api";
 import { Player } from "./Player";
 import { AudioManager } from "./AudioManager";
 
-function readRawFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
-      const rawData = new Uint8Array(event.target.result);
-      resolve(rawData);
-    };
-
-    reader.onerror = (event) => {
-      reject(event.target.error);
-    };
-
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function createImageDataBuffer(rawData, height, frameSize, frameCount, channelCount) {
-  frameCount = 2000;
-  const width = frameSize * frameCount;
-  const buffer = new ImageData(width, height);
-
-  const cols = [
-    [236, 72, 153],
-    [110, 231, 183],
-    [203, 213, 225],
-  ];
-
-  for (let frame = 0; frame < frameCount; frame++) {
-    const frameOffset = frame * frameSize * channelCount * 2;
-
-    for (let channel = 0; channel < channelCount; channel++) {
-      const channelOffset = channel * frameSize;
-      const channelBuffer = new Uint8Array(rawData.buffer, channelOffset + frameOffset, frameSize);
-
-      let col = cols[channel];
-      for (let i = 0; i < channelBuffer.length; i += 2) {
-        const yMin = channelBuffer[i] * 255 / 512;  // Scale from 0-512 to 0-255
-        const yMax = channelBuffer[i + 1] * 255 / 512;  // Scale from 0-512 to 0-255
-        const xIncrement = (i / 2 + frame * frameSize) | 0;
-        let x = i;
-        for (let y = yMin; y <= yMax; y++) {
-          const pixelIndex = (y * width + x + xIncrement) * 4;
-
-          if (buffer.data[pixelIndex] === col[0]) col = cols[2];
-          buffer.data[pixelIndex] = col[0];     // Set the red channel value
-          buffer.data[pixelIndex + 1] = col[1]; // Set the green channel value
-          buffer.data[pixelIndex + 2] = col[2]; // Set the blue channel value
-          buffer.data[pixelIndex + 3] = 255;    // Set the alpha channel value
-        }
-      }
-    }
+function decodeUint8Array(uint8Array) {
+  const decodedArray = new Array(uint8Array.length);
+  for (let i = 0; i < uint8Array.length; i++) {
+    const byte = uint8Array[i];
+    const signBit = byte & 0b1000_0000; // Extract the sign bit
+    const value = byte & 0b0111_1111; // Extract the value without the sign bit
+    const decodedValue = signBit ? -(value & 0b0111_1111) : value;
+    decodedArray[i] = decodedValue;
   }
-
-  return buffer;
-}
-
-function createImageDataBuffer(rawData, height, frameSize, frameCount, channelCount) {
-  frameCount = 1000
-  const width = frameSize * frameCount;
-  const buffer = new ImageData(width, height);
-
-  console.log(rawData, height, frameSize, frameCount, channelCount);
-  const cols = [
-    [236, 72, 153],
-    [110, 231, 183],
-    [203, 213, 225],
-  ];
-
-  const totalDataSize = rawData.length;
-  const fullFrameSize = frameSize * channelCount;
-
-  for (let frame = 0; frame < frameCount; frame++) {
-    const frameOffset = frame * fullFrameSize * 4;
-
-    for (let channel = 0; channel < channelCount - 1; channel++) {
-      const channelOffset = channel * frameSize * 4;
-      const dataSize = (frame < frameCount - 1) ? frameSize : (totalDataSize % frameSize);
-      const channelBuffer = new Uint16Array(
-        rawData.buffer,
-        channelOffset + frameOffset * 2,
-        dataSize * 2,
-      );
-
-      let col = cols[channel];
-      for (let i = 0; i < channelBuffer.length; i += 2) {
-        const yMin = channelBuffer[i];
-        const yMax = channelBuffer[i + 1];
-        let x = i + frame * frameSize;
-        for (let y = yMin; y <= yMax; y++) {
-          const pixelIndex = (y * width + x) * 4;
-
-          if (buffer.data[pixelIndex] == col[0]) col = cols[2];
-          buffer.data[pixelIndex] = col[0]; // Set the red channel value
-          buffer.data[pixelIndex + 1] = col[1]; // Set the green channel value
-          buffer.data[pixelIndex + 2] = col[2]; // Set the blue channel value
-          buffer.data[pixelIndex + 3] = 255; // Set the alpha channel value
-        }
-      }
-    }
-  }
-
-  return buffer;
+  return decodedArray;
 }
 
 function RawImageRenderer() {
   const canvasRef = useRef(null);
-  const [imgSrc, setImgSrc] = useState(null);
-
-  const generateImageSource = (imageBuffer) => {
-    const { width, height, data } = imageBuffer;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    canvas.width = width;
-    canvas.height = height;
-
-    const imageData = context.createImageData(width, height);
-    imageData.data.set(data);
-
-    context.putImageData(imageData, 0, 0);
-    const dataURL = canvas.toDataURL("image/png");
-
-    return dataURL;
-  }
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-
-    canvas.width = 400; // Set the desired width
-    canvas.height = 300; // Set the desired height
-    context.fillStyle = "#FFFFFF"; // Set the desired background color
-    context.fillRect(0, 0, canvas.width, canvas.height);
-  }, []);
+  const imageRef = useRef(null);
+  const [imgSrc, setImgSrc] = useState("/debug.png");
+  const [canvasX, setCanvasX] = useState(0);
+  const [canvasY, setCanvasY] = useState(512);
+  const channelsRef = useRef(null);
+  const samplesRef = useRef(null);
 
   const processRawFile = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const data = new Uint16Array(reader.result);
-      const height = data[0];
-      const windowSize = data[1];
-      const samplesPerPixel = data[2];
-      const channelCount = data[3];
-      const frameCount = data[4];
-      // Process the raw data and generate the image source
-      const imageBuffer = createImageDataBuffer(
-        new Uint16Array(reader.result),
-        height,
-        windowSize / samplesPerPixel,
-        frameCount,
-        channelCount
-      );
-      const imageSrc = generateImageSource(imageBuffer);
-
-      // Set the image source to trigger rendering
-      setImgSrc(imageSrc);
+      const data = new Uint8Array(reader.result);
+      renderWaveform(data);
     };
-     reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(file);
+  };
+
+  useLayoutEffect(() => {
+    // Callback function to execute after canvas size has rendered
+    const handleCanvasSizeRendered = () => {
+      // Perform actions here, after canvas size has been set
+      console.log("Canvas size rendered!");
+    };
+
+    // Check if canvas size has been set
+    if (canvasX > 0) {
+      const cols = [
+        [217, 70, 239],
+        [34, 197, 94]
+      ];
+
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      const channelCount = channelsRef.current;
+      const samples = samplesRef.current;
+      for (let i = 0; i < channelCount; i++) {
+        const points = [];
+
+        for (let x = 0; x < samples[i].length; x += 2) {
+          const y = samples[i][x] + 255;
+          const z = samples[i][x + 1] + 255;
+          points.push({ x: x / 2, y, z });
+        }
+
+        const col = cols[i];
+        ctx.beginPath();
+        ctx.globalCompositeOperation = "screen";
+        ctx.moveTo(points[0].x, points[0].y);
+        ctx.strokeStyle = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+        ctx.lineWidth = 0.5;
+
+        for (let j = 1; j < points.length; j++) {
+          const p = points[j];
+          const x = p.x;
+          const y = p.y;
+          const z = p.z;
+
+          ctx.globalCompositeOperation = "screen";
+          ctx.strokeStyle = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, 255);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(x, z);
+          ctx.lineTo(x, 255);
+          ctx.stroke();
+        }
+     }
+        setImgSrc(canvasRef.current.toDataURL("image/png"));
+ 
+    }
+  }, [canvasX]);
+
+  const renderWaveform = (data) => {
+    const height = 512;
+    const channelCount = data[0];
+    const dataStartOffset = 1;
+
+    const samples = [];
+    for (let i = 0; i < channelCount; i++) {
+      samples[i] = [];
+    }
+
+    const pcm = decodeUint8Array(data).slice(1);
+
+    for (let i = 0; i < pcm.length; i += channelCount) {
+      for (let j = 0; j < channelCount; j++) {
+        samples[j].push(pcm[i + j]);
+      }
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    samplesRef.current = samples;
+    channelsRef.current = channelCount;
+    let width = samples[0].length/2;
+    setCanvasX(width);
   };
 
   return (
-    <>
+    <div className='m-8'>
       <input
         type='file'
         onChange={(evt) => {
@@ -177,9 +133,11 @@ function RawImageRenderer() {
           processRawFile(file);
         }}
       />
-      <img className='h-24 border border-4 border-red-500 p-4' src={imgSrc} alt='Raw Image' />
-      <canvas ref={canvasRef} className='bg-gradient-to-r from-gray-50 to-gray-100'/>
-    </>
+      <div classNamez='saturate-200 hue-rotate-15 backdrop-contrast-200'>
+          <img className='bg-slate-50 mt-4 drop-shadow-lg p-2 w-full' style={{ width: `100%`, height: "128px" }} ref={imageRef} src={imgSrc} />
+      </div>  
+    <canvas width={canvasX} height={canvasY} ref={canvasRef} className='bg-gradient-to-b from-white to-gray-50' />
+    </div>
   );
 }
 
