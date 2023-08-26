@@ -1,3 +1,10 @@
+const { startup: startup_mel } = wasm_bindgen_mel;
+const { startup: startup_wav } = wasm_bindgen_wav;
+const { startup: startup_opus } = wasm_bindgen_opus;
+
+
+
+
 import React, { createContext, useContext, useState, useEffect, useRef, useLayoutEffect } from "react";
 
 import jwt_decode from "jwt-decode";
@@ -7,6 +14,45 @@ import { StoreProvider, StoreContext } from "./Store";
 import { apiHost, apiToken } from "./Api";
 import { Player } from "./Player";
 import { AudioManager } from "./AudioManager";
+
+
+const fftSize = 1024;
+const hopSize = 160;
+const samplingRate = 16000;
+const nMels = 80;
+
+const melBufOpts = {
+  size: nMels + 8,
+  max: 64,
+};
+
+const micBufOpts = {
+  size: 128,
+  max: 64,
+};
+
+const wavBufOpts = {
+  size: 160,
+  max: 200_000,
+};
+
+const melSab = sharedbuffer(melBufOpts.size, melBufOpts.max, Uint8ClampedArray);
+const melBuf = ringbuffer(
+  melSab,
+  melBufOpts.size,
+  melBufOpts.max,
+  Uint8ClampedArray
+);
+const micSab = sharedbuffer(micBufOpts.size, micBufOpts.max, Float32Array);
+const wavSab = sharedbuffer(wavBufOpts.size, wavBufOpts.max, Float32Array);
+
+let wav_worker;
+let pcm_worker;
+let opus_worker;
+
+
+
+
 
 const FileUpload = () => {
   const [files, setFiles] = useContext(FilesContext);
@@ -158,6 +204,7 @@ const FilesProvider = ({ children }) => {
 };
 
 function Tasks({ task }) {
+  console.log("here")
   return (
     <div className='m-4 bg-gray-50'>
       {task === "upload" && (
@@ -304,6 +351,10 @@ export default function App() {
                   </div>
                 </section>
               </div>
+            </div>
+            <div className='w-full sm:flex-1 bg-zinc-100'>
+              <Tasks task={task} />
+              <Sounds theme={theme} mode={mode} audioManager={audioManager} />
             </div>
           </FilesProvider>
         </main>

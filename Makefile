@@ -19,7 +19,7 @@ deploy:
 	aws cloudformation deploy \
 	 --region $(REGION) \
 	 --stack-name $(ENV)-${STACK_NAME} \
-		--template-file template.yml \
+		--template-file template.cfn.yml \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--parameter-overrides \
 			PipelineOnly=yes \

@@ -21,7 +21,7 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 
 rm -rf .artifacts
 mkdir -p .artifacts/marketing .artifacts/app .artifacts/templates
-cp template.yml .artifacts/templates/template.yml
+cp template.cfn.yml .artifacts/templates/template.yml
 
 TEMPLATE=${CODEBUILD_SRC_DIR}/.artifacts/templates/template.yml
 
@@ -41,13 +41,15 @@ for site in marketing app; do
     echo "Tag ${rev} already exists in S3. Skipping build."
   else
     cd web/${site} && make build && cd "${CODEBUILD_SRC_DIR}"
-    sed -i.bak "s/index.js/\/${rev}\/index.js/g" web/${site}/build/index.html
-    sed -i.bak "s/index.css/\/${rev}\/index.css/g" web/${site}/build/index.html
+    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/index.html
+    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/app.js
+    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/mel_worker.js
+    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/wav_worker.js
+    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/opus_worker.js
+
     sed -i.bak "s/manifest.json/\/${rev}\/manifest.json/g" web/${site}/build/index.html
-    mv web/${site}/build/* ".artifacts/${site}/"
-    mv ".artifacts/${site}/index.js" ".artifacts/${site}/${rev}/"
-    mv ".artifacts/${site}/index.css" ".artifacts/${site}/${rev}/"
-    mv ".artifacts/${site}/manifest.json" ".artifacts/${site}/${rev}/"
+    cp web/${site}/build/* ".artifacts/${site}/${rev}"
+    cp web/${site}/build/index.html ".artifacts/${site}/"
   fi
 done
 
