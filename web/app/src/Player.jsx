@@ -2,7 +2,6 @@ import React, { useMemo, useEffect, useRef, useState, useContext } from "react";
 import axios from "axios";
 import { OpusDecoderWebWorker } from "opus-decoder";
 import { apiHost, streamHost, apiToken } from "./Api";
-import Peaks from "peaks.js";
 import { Range } from "react-range";
 
 const Waveform = ({ audioData, sampleWindowLength, col }) => {
@@ -483,7 +482,7 @@ export const Player = ({ audioManager, soundId, theme, mode, tiny }) => {
         const objectUrl = URL.createObjectURL(blob);
         setImageSonoEqBlob(objectUrl);
         let img = new Image();
-        img.onload = function () {
+        img.onload = function() {
           sonoWidth.current = img.naturalWidth;
         };
         img.src = objectUrl;
@@ -495,31 +494,31 @@ export const Player = ({ audioManager, soundId, theme, mode, tiny }) => {
       getWaveformData(soundId).then(async (blob) => {
         const buf = await blob.arrayBuffer();
         const player = {
-          init: function (eventEmitter) {
+          init: function(eventEmitter) {
             peaksEvts.current = eventEmitter;
             return Promise.resolve();
           },
-          destroy: function () {},
-          play: function () {
+          destroy: function() { },
+          play: function() {
             const ts = playerTime();
             playAt(ts);
           },
-          pause: function () {
+          pause: function() {
             pausePlaying();
           },
-          seek: function (time) {
+          seek: function(time) {
             goTo(time);
           },
-          isPlaying: function () {
+          isPlaying: function() {
             return isPlaying.current;
           },
-          isSeeking: function () {
+          isSeeking: function() {
             return isDragging.current;
           },
-          getCurrentTime: function () {
+          getCurrentTime: function() {
             return playerTime();
           },
-          getDuration: function () {
+          getDuration: function() {
             return cues.current.length * 200;
           }
         };
@@ -545,13 +544,13 @@ export const Player = ({ audioManager, soundId, theme, mode, tiny }) => {
           }
         };
 
-        Peaks.init(options, function (err, peaks) {
+        Peaks.init(options, function(err, peaks) {
           if (err) {
             console.error("Failed to initialize Peaks instance: " + err.message);
             return;
           }
 
-          peaks.on("segments.dragend", function () {
+          peaks.on("segments.dragend", function() {
             resetDraftClips();
           });
 
@@ -791,9 +790,9 @@ export const Player = ({ audioManager, soundId, theme, mode, tiny }) => {
             </div>
             <div className='flex flex-col flex-1'>
               <div className='flex flex-row w-full overflow-hidden relative h-40 rounded rounded-md border border-zinc-700 drop-shadow-lg bg-slate-950'
-                 style={{ borderTopColor: "#ff04c7", borderLeftColor: "#ff04c7" }}
-       > 
-        <div
+                style={{ borderTopColor: "#ff04c7", borderLeftColor: "#ff04c7" }}
+              >
+                <div
                   ref={sonoRef}
                   style={{ willChange: "transform", marginLeft: "0px", width: `${sonoWidth.current}px` }}
                   className='contrast-200 absolute left-1/2'
