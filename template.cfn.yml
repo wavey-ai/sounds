@@ -203,17 +203,11 @@ Resources:
             OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
         Comment: Amazon CloudFront Distribution Secured by OIDC
         DefaultRootObject: index.html
-        CacheBehaviors:
-        - PathPattern: "*.wasm"
+        DefaultCacheBehavior:
           AllowedMethods:
-          - GET
-          - HEAD
-          - OPTIONS
-          DefaultTTL: 900
-          MaxTTL: 900
-          MinTTL: 900
-          Compress: true
-          ResponseHeadersPolicyId: !Ref WasmResponseHeadersPolicy
+            - GET
+            - HEAD
+            - OPTIONS
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # disabled
           OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # all sans host
           TargetOriginId: myS3Origin
@@ -228,6 +222,34 @@ Resources:
               - '*'
             Cookies:
               Forward: 'all'
+          MinTTL: 900
+          MaxTTL: 900
+          DefaultTTL: 900
+        CacheBehaviors:
+          - PathPattern: "*.wasm"
+            AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            DefaultTTL: 900
+            MaxTTL: 900
+            MinTTL: 900
+            Compress: true
+            ResponseHeadersPolicyId: !Ref WasmResponseHeadersPolicy
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # disabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # all sans host
+            TargetOriginId: myS3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            LambdaFunctionAssociations:
+              -
+                EventType: viewer-request
+                LambdaFunctionARN: !Ref EdgeAppAuth.Version
+            ForwardedValues:
+              QueryString: 'true'
+              Headers:
+                - '*'
+              Cookies:
+                Forward: 'all'
 
   EdgeAppAuth:
     Type: AWS::Serverless::Function
@@ -676,9 +698,13 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt LambdaRole.Arn
-      ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/sounds-uploads-lambda:latest
-      PackageType: Image
-      MemorySize: 10240
+      CodeUri:
+        Bucket: !Ref DeployBucket
+        Key: __rev__/uploads/function.zip
+      Handler: main
+      Runtime: provided.al2
+      Architectures:
+        - arm64
       Timeout: 890
       DeadLetterQueue:
         Type: SQS
@@ -702,9 +728,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-upload/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Sub ${StageName}_${UploadsTableName}
@@ -736,9 +762,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-sounds/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Sub ${StageName}_${FormatsTableName}
@@ -768,9 +794,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/create-clips/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Sub ${StageName}_${ClipsTableName}
@@ -800,9 +826,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-clips/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Sub ${StageName}_${ClipsTableName}
@@ -1128,9 +1154,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/ws-sub/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Ref WebsocketDynamoDBTable
@@ -1150,9 +1176,9 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/ws-pub/function.zip
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2
       Architectures:
-        - x86_64
+        - arm64
       Environment:
         Variables:
           TABLE_NAME: !Ref WebsocketDynamoDBTable
@@ -1349,8 +1375,8 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_LARGE
-        Image: "aws/codebuild/amazonlinux2-x86_64-standard:4.0"
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: "aws/codebuild/amazonlinux2-aarch64-standard:4.0"
         ImagePullCredentialsType: CODEBUILD
         PrivilegedMode: true
         EnvironmentVariables:
