@@ -260,7 +260,7 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/test-auth-token/function.zip
       Runtime: nodejs14.x
-      Handler: main.handler
+      Handler: bootstrap.handler
       Timeout: 5
       AutoPublishAlias: LIVE
       DeploymentPreference:
@@ -303,7 +303,7 @@ Resources:
         Bucket: !Ref DeployBucket
         Key: __rev__/test-auth-token/function.zip
       Runtime: nodejs14.x
-      Handler: main.handler
+      Handler: bootstrap.handler
       Timeout: 5
       AutoPublishAlias: LIVE
       DeploymentPreference:
@@ -680,7 +680,7 @@ Resources:
     Type: "AWS::Lambda::Permission"
     Properties:
       Action: "lambda:InvokeFunction"
-      FunctionName: !GetAtt LambdaUploadsFunction.Arn
+      FunctionName: !GetAtt LambdaUploadEventFunction.Arn
       Principal: "sqs.amazonaws.com"
       SourceArn: !GetAtt UploadsBucketQueue.Arn
 
@@ -689,11 +689,11 @@ Resources:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
       EventSourceArn: !GetAtt UploadsBucketQueue.Arn
-      FunctionName: !GetAtt LambdaUploadsFunction.Arn
+      FunctionName: !GetAtt LambdaUploadEventFunction.Arn
       Enabled: true
       BatchSize: 10
 
-  LambdaUploadsFunction:
+  LambdaUploadEventFunction:
     Condition: CreateResource
     Type: AWS::Serverless::Function
     Properties:
@@ -701,7 +701,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/uploads/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -727,7 +727,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-upload/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -761,7 +761,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-sounds/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -793,7 +793,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/create-clips/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -825,7 +825,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/get-clips/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -1153,7 +1153,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/ws-sub/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
@@ -1175,7 +1175,7 @@ Resources:
       CodeUri:
         Bucket: !Ref DeployBucket
         Key: __rev__/ws-pub/function.zip
-      Handler: main
+      Handler: bootstrap
       Runtime: provided.al2
       Architectures:
         - arm64
