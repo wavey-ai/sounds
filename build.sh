@@ -41,12 +41,10 @@ for site in marketing app; do
     echo "Tag ${rev} already exists in S3. Skipping build."
   else
     cd web/${site} && make build && cd "${CODEBUILD_SRC_DIR}"
-    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/index.html
-    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/app.js
-    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/mel_worker.js
-    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/wav_worker.js
-    sed -i.bak "s/__rev__/${rev}/g" web/${site}/build/opus_worker.js
 
+    for file in web/${site}/build/*.html web/${site}/build/*.js; do
+      sed -i.bak "s/__rev__/${rev}/g" "$file"
+    done
     sed -i.bak "s/manifest.json/\/${rev}\/manifest.json/g" web/${site}/build/index.html
     cp web/${site}/build/* ".artifacts/${site}/${rev}"
     cp web/${site}/build/index.html ".artifacts/${site}/"
