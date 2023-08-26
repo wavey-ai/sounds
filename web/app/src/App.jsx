@@ -305,11 +305,6 @@ export default function App() {
                 </section>
               </div>
             </div>
-            <div className='w-full sm:flex-1 bg-zinc-100'>
-              <RawImageRenderer />
-              <Tasks task={task} />
-              <Sounds theme={theme} mode={mode} audioManager={audioManager} />
-            </div>
           </FilesProvider>
         </main>
       </StoreProvider>
