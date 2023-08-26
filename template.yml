@@ -1215,7 +1215,7 @@ Resources:
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
-                - Name: explore
+                - Name: marketing
                 - Name: app
                 - Name: functions
                 - Name: templates
@@ -1223,7 +1223,7 @@ Resources:
               RunOrder: 1
         - Name: s3-uploads
           Actions:
-            - Name: cloudfront-explore
+            - Name: cloudfront-marketing
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
@@ -1234,7 +1234,7 @@ Resources:
                 BucketName: !If [CreateGlobal, !Ref MarketingBucket, !Ref BootstrapBucket]
                 Extract: "true"
               InputArtifacts:
-                - Name: explore
+                - Name: marketing
               Region: !Ref AWS::Region
             - Name: cloudfront-app
               ActionTypeId:
@@ -1343,7 +1343,7 @@ Resources:
             Value: !Ref DeployBucket
           - Name: APP_BUCKET
             Value: !If [CreateGlobal, !Ref AppBucket, !Ref BootstrapBucket]
-          - Name: EXPLORE_BUCKET
+          - Name: MARKETING_BUCKET
             Value: !If [CreateGlobal, !Ref MarketingBucket, !Ref BootstrapBucket]
           - Name: UPLOADS_BUCKET
             Value: !If [CreateResource, !Ref UploadsBucket, !Ref BootstrapBucket]

@@ -17,7 +17,7 @@ touch:
 .PHONY: deploy
 deploy:
 	aws cloudformation deploy \
-	 --region eu-west-2 \
+	 --region $(REGION) \
 	 --stack-name $(ENV)-${STACK_NAME} \
 		--template-file template.yml \
 		--capabilities CAPABILITY_NAMED_IAM \

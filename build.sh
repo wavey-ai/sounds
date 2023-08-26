@@ -20,14 +20,14 @@ aws ecr-public get-login-password --region us-east-1 | docker login --username A
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
 
 rm -rf .artifacts
-mkdir -p .artifacts/explore .artifacts/app .artifacts/templates
+mkdir -p .artifacts/marketing .artifacts/app .artifacts/templates
 cp template.yml .artifacts/templates/template.yml
 
 TEMPLATE=${CODEBUILD_SRC_DIR}/.artifacts/templates/template.yml
 
-for site in explore app; do
-  if [[ "$site" == "explore" ]]; then
-    bkt="explore_BUCKET"
+for site in marketing app; do
+  if [[ "$site" == "marketing" ]]; then
+    bkt="MARKETING_BUCKET"
   else
     bkt="APP_BUCKET"
   fi
@@ -51,7 +51,7 @@ for site in explore app; do
   fi
 done
 
-for func in get-sounds get-upload test-auth-token ws-pub ws-sub create-clips get-clips; do
+for func in get-sounds get-upload test-auth-token ws-pub ws-sub create-clips get-clips uploads; do
   rev=$(find ./lambda/${func}/ -type f -exec md5sum {} + | sort -k 2 | md5sum | awk '{print $1}');
   mkdir -p ".artifacts/functions/${rev}/${func}"
   sed -i.bak "s/__rev__\/${func}/${rev}\/${func}/g" ${TEMPLATE}
@@ -74,27 +74,5 @@ for func in get-sounds get-upload test-auth-token ws-pub ws-sub create-clips get
     mv "./lambda/${func}/build/function.zip" ".artifacts/functions/${rev}/${func}/";
   fi
 done
-
-rev=$(find ./lambda/uploads/ -type f -exec md5sum {} + | sort -k 2 | md5sum | awk '{print $1}')
-sed -i.bak "s/sounds-uploads-lambda:latest/sounds-uploads-lambda:${rev}/g" ${TEMPLATE}
-if aws ecr describe-images --repository-name sounds-uploads-lambda --image-ids imageTag=${rev} >/dev/null 2>&1; then
-  echo "Tag ${rev} already exists in ECR repository. Skipping build and push."
-else
-  cd ./lambda/uploads
-  docker build -t ${ECR_REPO}/sounds-uploads-lambda:latest -t ${ECR_REPO}/sounds-uploads-lambda:${rev} .
-  docker push ${ECR_REPO}/sounds-uploads-lambda:${rev}
-  cd ${CODEBUILD_SRC_DIR}
-fi
-
-rev=$(find ./lambda/pngquant/ -type f -exec md5sum {} + | sort -k 2 | md5sum | awk '{print $1}')
-sed -i.bak "s/pngquant-lambda:latest/pngquant-lambda:${rev}/g" ${TEMPLATE}
-if aws ecr describe-images --repository-name pngquant-lambda --image-ids imageTag=${rev} >/dev/null 2>&1; then
-  echo "Tag ${rev} already exists in ECR repository. Skipping build and push."
-else
-  cd ./lambda/pngquant
-  docker build -t ${ECR_REPO}/pngquant-lambda:latest -t ${ECR_REPO}/pngquant-lambda:${rev} .
-  docker push ${ECR_REPO}/pngquant-lambda:${rev}
-  cd ${CODEBUILD_SRC_DIR}
-fi
 
 sed -i.bak "s/__ArtifactsBucket__/${ARTIFACTS_BUCKET}/g" ${TEMPLATE}
