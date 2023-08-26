@@ -18,6 +18,6 @@ build: clean
 	sed -i.bak "s/wasm_bindgen/wasm_bindgen_opus/g" build/soundkit.js
 	cp src/*.js build
 	cp soundkit/js/* build
-	cat soundkit/js/ringbuffer.js src/worklet.js > build/worklet.js
+	cat soundkit/js/ringbuffer.js soundkit/js/worklet.js > build/worklet.js
 	git clone https://github.com/timothygebhard/js-colormaps.git
 	cp js-colormaps/js-colormaps.js build
