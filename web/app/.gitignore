@@ -1,3 +1,7 @@
 .yarn
 build
 bundle
+js-colormaps
+mel-spec
+opus-rs
+soundkit

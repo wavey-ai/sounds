@@ -31,15 +31,16 @@ const serverParams = {
   // middleware: [function(req, res, next) { next(); }] // Takes an array of Connect-compatible middleware that are injected into the server middleware stack
   middleware: [(req, res, next) => {
     const parsedUrl = url.parse(req.url);
-
-    console.log(parsedUrl.pathname)
     // Remove the /__rev__/ prefix from the URL
     if (parsedUrl.pathname.startsWith('/__rev__/')) {
       parsedUrl.pathname = parsedUrl.pathname.replace('/__rev__/', '/');
-      req.url = url.format(parsedUrl);
+      req.url = parsedUrl.pathname;
+      res.statusCode = 302;
+      res.setHeader('Location', req.url);
+      res.end();
+    } else {
+      next();
     }
-
-    next();
   }],
 };
 
