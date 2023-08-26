@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,21 +34,19 @@ func main() {
 	dbCl := dynamodb.NewFromConfig(cfg)
 	s3Cl := s3.NewPresignClient(s3.NewFromConfig(cfg))
 	bucketName := os.Getenv("BUCKET_NAME")
-	uploadsPrefix := os.Getenv("UPLOADS_PREFIX")
 	tableName := os.Getenv("TABLE_NAME")
 
-	h := handler{dbCl, s3Cl, bucketName, uploadsPrefix, tableName, &log}
+	h := handler{dbCl, s3Cl, bucketName, tableName, &log}
 
 	lambda.Start(h.handleRequest)
 }
 
 type handler struct {
-	dbCl          *dynamodb.Client
-	s3Cl          *s3.PresignClient
-	bucketName    string
-	uploadsPrefix string
-	tableName     string
-	log           *zerolog.Logger
+	dbCl       *dynamodb.Client
+	s3Cl       *s3.PresignClient
+	bucketName string
+	tableName  string
+	log        *zerolog.Logger
 }
 
 type PresignedURLResponse struct {
@@ -92,7 +89,6 @@ func (h handler) handleRequest(ctx context.Context, event events.APIGatewayV2HTT
 	log := h.log.With().
 		Str("objectKey", key).
 		Str("bucketName", h.bucketName).
-		Str("uploadsPrefix", h.uploadsPrefix).
 		Logger()
 
 	input := &dynamodb.PutItemInput{
@@ -117,14 +113,13 @@ func (h handler) handleRequest(ctx context.Context, event events.APIGatewayV2HTT
 		}, nil
 	}
 
-	path := fmt.Sprintf("uploads/%s/%s", h.uploadsPrefix, key)
 	putObjectArgs := s3.PutObjectInput{
 		Bucket: &h.bucketName,
-		Key:    &path,
+		Key:    &key,
 	}
 
 	options := func(opts *s3.PresignOptions) {
-		opts.Expires = time.Duration(15 * time.Minute)
+		opts.Expires = time.Duration(5 * time.Minute)
 	}
 
 	res, err := h.s3Cl.PresignPutObject(context.Background(), &putObjectArgs, options)

@@ -37,7 +37,7 @@ Parameters:
   AppSubdomain:
     Type: String
     Default: app
-  ExploreSubdomain:
+  MarketingSubdomain:
     Type: String
     Default: www
   WsSubdomain:
@@ -134,7 +134,7 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  ExploreBucket:
+  MarketingBucket:
     Type: AWS::S3::Bucket
     Condition: CreateGlobal
 
@@ -300,16 +300,16 @@ Resources:
                   - 'logs:PutLogEvents'
                 Resource: '*'
 
-  ExploreBucketReadPolicy:
+  MarketingBucketReadPolicy:
     Type: AWS::S3::BucketPolicy
     Condition: CreateGlobal
     Properties:
-      Bucket: !Ref ExploreBucket
+      Bucket: !Ref MarketingBucket
       PolicyDocument:
        Statement:
        - Action: 's3:GetObject'
          Effect: Allow
-         Resource: !Sub 'arn:aws:s3:::${ExploreBucket}/*'
+         Resource: !Sub 'arn:aws:s3:::${MarketingBucket}/*'
          Principal:
            CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
 
@@ -320,7 +320,7 @@ Resources:
       CloudFrontOriginAccessIdentityConfig:
         Comment: !Ref AWS::StackName
 
-  ExploreDistribution:
+  MarketingDistribution:
     Type: AWS::CloudFront::Distribution
     Condition: CreateGlobal
     Properties:
@@ -328,7 +328,7 @@ Resources:
         Aliases:
           - !Sub
             - "${Subdomain}.${Domain}"
-            - Subdomain: !If [IsProd, !Ref ExploreSubdomain, !Sub '${StageName}-${ExploreSubdomain}']
+            - Subdomain: !If [IsProd, !Ref MarketingSubdomain, !Sub '${StageName}-${MarketingSubdomain}']
               Domain: !Ref DomainName
         ViewerCertificate:
           AcmCertificateArn: !Ref Certificate
@@ -339,7 +339,7 @@ Resources:
           Prefix: "marketing-cloudfront/"
         Enabled: true
         Origins:
-        - DomainName: !GetAtt ExploreBucket.DomainName
+        - DomainName: !GetAtt MarketingBucket.DomainName
           Id: myS3Origin
           S3OriginConfig:
             OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
@@ -360,19 +360,19 @@ Resources:
             Cookies:
               Forward: 'all'
 
-  Route53ExploreSubdomainAliasRecord:
+  Route53MarketingSubdomainAliasRecord:
     Type: 'AWS::Route53::RecordSet'
     Condition: CreateGlobal
     Properties:
       HostedZoneId: !Ref HostedZoneId
       Name: !Sub
         - "${Subdomain}.${Domain}"
-        - Subdomain: !If [IsProd, !Ref ExploreSubdomain, !Sub '${StageName}-${ExploreSubdomain}']
+        - Subdomain: !If [IsProd, !Ref MarketingSubdomain, !Sub '${StageName}-${MarketingSubdomain}']
           Domain: !Ref DomainName
       Type: A
       AliasTarget:
         HostedZoneId: Z2FDTNDATAQYW2 # This is a fixed value for CloudFront distributions
-        DNSName: !GetAtt ExploreDistribution.DomainName
+        DNSName: !GetAtt MarketingDistribution.DomainName
 
   Route53AppSubdomainAliasRecord:
     Type: 'AWS::Route53::RecordSet'
@@ -513,33 +513,6 @@ Resources:
         HostedZoneId: Z2FDTNDATAQYW2 # fixed value for CloudFront
         DNSName: !GetAtt UserPoolDomain.CloudFrontDistribution
 
-  SoundsBucket:
-    Condition: CreateResource
-    DependsOn: PngQueuePolicy
-    Type: AWS::S3::Bucket
-    Properties:
-      NotificationConfiguration:
-        QueueConfigurations:
-          - Event: s3:ObjectCreated:*
-            Queue: !GetAtt PngQueue.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: "png/"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-            - "*"
-            AllowedMethods:
-            - GET
-            AllowedOrigins:
-            - !Sub
-              - "https://${Subdomain}.${Domain}"
-              - Subdomain: !If [IsProd, !Ref AppSubdomain, !Sub '${StageName}-${AppSubdomain}']
-                Domain: !Ref DomainName
-            - http://localhost:8181
-
   UploadsBucketQueuePolicy:
     Condition: CreateResource
     Type: AWS::SQS::QueuePolicy
@@ -627,8 +600,8 @@ Resources:
                 Action:
                   - s3:*
                 Resource:
-                  - !Sub arn:aws:s3:::${SoundsBucket}
-                  - !Sub arn:aws:s3:::${SoundsBucket}/*
+                  - !Sub arn:aws:s3:::${UploadsBucket}
+                  - !Sub arn:aws:s3:::${UploadsBucket}/*
         - PolicyName: S3UploadsBucketPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -665,25 +638,6 @@ Resources:
                 Action:
                   - sns:Publish
                 Resource: !Ref UploadsSnsTopic
-        - PolicyName: PngQueueRecMessagePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !GetAtt PngQueue.Arn
-        - PolicyName: PngQueueSendMessagePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt PngDLQ.Arn
-
   LambdaUploadsSQSPermission:
     Condition: CreateResource
     Type: "AWS::Lambda::Permission"
@@ -717,81 +671,12 @@ Resources:
       Environment:
         Variables:
           TOPIC_ARN: !Ref UploadsSnsTopic
-          SOUNDS_BUCKET: !Ref SoundsBucket
           UPLOADS_TABLE_NAME: !Sub ${StageName}_${UploadsTableName}
           FORMATS_TABLE_NAME: !Sub ${StageName}_${FormatsTableName}
       AutoPublishAlias: LIVE
       DeploymentPreference:
         Enabled: true
         Type: AllAtOnce
-
-  LambdaPngSQSPermission:
-    Condition: CreateResource
-    Type: "AWS::Lambda::Permission"
-    Properties:
-      Action: "lambda:InvokeFunction"
-      FunctionName: !GetAtt LambdaPngFunction.Arn
-      Principal: "sqs.amazonaws.com"
-      SourceArn: !GetAtt PngQueue.Arn
-
-  SoundsBucketPngEventSourceMapping:
-    Condition: CreateResource
-    Type: AWS::Lambda::EventSourceMapping
-    Properties:
-      EventSourceArn: !GetAtt PngQueue.Arn
-      FunctionName: !GetAtt LambdaPngFunction.Arn
-      Enabled: true
-      BatchSize: 10
-
-  LambdaPngFunction:
-    Condition: CreateResource
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt LambdaRole.Arn
-      ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/pngquant-lambda:448aa71ffd4bb218383877f1d08757f9
-      PackageType: Image
-      MemorySize: 2048
-      Timeout: 590
-      DeadLetterQueue:
-        Type: SQS
-        TargetArn: !GetAtt PngDLQ.Arn
-      Environment:
-        Variables:
-          SOUNDS_BUCKET: !Ref SoundsBucket
-      AutoPublishAlias: LIVE
-      DeploymentPreference:
-        Enabled: true
-        Type: AllAtOnce
-
-  PngQueue:
-    Condition: CreateResource
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Sub ${AWS::StackName}-png
-      VisibilityTimeout: 600
-      RedrivePolicy:
-        maxReceiveCount: 1
-        deadLetterTargetArn: !GetAtt PngDLQ.Arn
-
-  PngDLQ:
-    Condition: CreateResource
-    Type: "AWS::SQS::Queue"
-    Properties:
-      QueueName: !Sub ${AWS::StackName}-png-dlq
-
-  PngQueuePolicy:
-    Condition: CreateResource
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      PolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: "s3.amazonaws.com"
-            Action: 'SQS:SendMessage'
-            Resource: !GetAtt PngQueue.Arn
-      Queues:
-        - !Ref PngQueue
 
   HttpApiGetUploadFunction:
     Condition: CreateResource
@@ -984,12 +869,12 @@ Resources:
     Condition: CreateResource
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref SoundsBucket
+      Bucket: !Ref UploadsBucket
       PolicyDocument:
        Statement:
        - Action: 's3:GetObject'
          Effect: Allow
-         Resource: !Sub 'arn:aws:s3:::${SoundsBucket}/*'
+         Resource: !Sub 'arn:aws:s3:::${UploadsBucket}/*'
          Principal:
            CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
 
@@ -1013,7 +898,7 @@ Resources:
           Prefix: "app-cloudfront/"
         Enabled: true
         Origins:
-        - DomainName: !GetAtt SoundsBucket.DomainName
+        - DomainName: !GetAtt UploadsBucket.DomainName
           Id: myS3Origin
           S3OriginConfig:
             OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
@@ -1346,7 +1231,7 @@ Resources:
                 Version: '1'
               RunOrder: 1
               Configuration:
-                BucketName: !If [CreateGlobal, !Ref ExploreBucket, !Ref BootstrapBucket]
+                BucketName: !If [CreateGlobal, !Ref MarketingBucket, !Ref BootstrapBucket]
                 Extract: "true"
               InputArtifacts:
                 - Name: explore
@@ -1459,11 +1344,9 @@ Resources:
           - Name: APP_BUCKET
             Value: !If [CreateGlobal, !Ref AppBucket, !Ref BootstrapBucket]
           - Name: EXPLORE_BUCKET
-            Value: !If [CreateGlobal, !Ref ExploreBucket, !Ref BootstrapBucket]
+            Value: !If [CreateGlobal, !Ref MarketingBucket, !Ref BootstrapBucket]
           - Name: UPLOADS_BUCKET
             Value: !If [CreateResource, !Ref UploadsBucket, !Ref BootstrapBucket]
-          - Name: SOUNDS_BUCKET
-            Value: !If [CreateResource, !Ref SoundsBucket, !Ref BootstrapBucket]
           - Name: USER_POOL_ID
             Value: !If [CreateResource, !Ref UserPool, 'foo']
           - Name: USER_POOL_APP_ID

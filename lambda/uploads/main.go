@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -21,12 +19,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/ksuid"
-)
-
-const (
-	Stream128k = "stream_128k"
-	Stream96k  = "stream_96k"
-	PCM16k     = "pcm_s16le"
 )
 
 func main() {
@@ -47,7 +39,6 @@ func main() {
 	topicArn := os.Getenv("TOPIC_ARN")
 	uploadsTbl := os.Getenv("UPLOADS_TABLE_NAME")
 	formatsTbl := os.Getenv("FORMATS_TABLE_NAME")
-	soundsBucket := os.Getenv("SOUNDS_BUCKET")
 
 	h := handler{
 		dbCl,
@@ -56,7 +47,6 @@ func main() {
 		topicArn,
 		uploadsTbl,
 		formatsTbl,
-		soundsBucket,
 		&log,
 	}
 
@@ -64,14 +54,13 @@ func main() {
 }
 
 type handler struct {
-	dbCl         *dynamodb.Client
-	s3cl         *s3.Client
-	snsCl        *sns.Client
-	topicArn     string
-	uploadsTbl   string
-	formatsTbl   string
-	soundsBucket string
-	log          *zerolog.Logger
+	dbCl       *dynamodb.Client
+	s3cl       *s3.Client
+	snsCl      *sns.Client
+	topicArn   string
+	uploadsTbl string
+	formatsTbl string
+	log        *zerolog.Logger
 }
 
 type Item struct {
@@ -128,55 +117,17 @@ func (h handler) handler(evt events.SQSEvent) (msg string, err error) {
 				return msg, err
 			}
 
-			srcUrl := fmt.Sprintf("s3://%s/%s", bucket, objectPath)
-			dstUrl := fmt.Sprintf("s3://%s", h.soundsBucket)
-
-			cmd := exec.Command("/app/process.sh", srcUrl, dstUrl, objectKey)
-			stderr := &bytes.Buffer{}
-			cmd.Stderr = stderr
-
-			err = cmd.Run()
-			if err != nil {
-				h.log.Err(err).Msgf("process command error output: %s", stderr.String())
-				return msg, err
-			}
-
-			log.Info().Msg("process task completed")
-
-			keys := []string{
-				fmt.Sprintf("stream/%s/%s_%s", objectKey, objectKey, Stream96k),
-				fmt.Sprintf("av/%s/%s_waveform.dat", objectKey, objectKey),
-			}
-
-			for _, k := range keys {
-				params := &s3.HeadObjectInput{
-					Bucket: &h.soundsBucket,
-					Key:    &k,
-				}
-
-				resp, err := h.s3cl.HeadObject(context.TODO(), params)
-				if err != nil {
-					h.log.Err(err).Msgf("error HeadObject %s", k)
-					return msg, err
-				}
-
-				if resp.ContentLength == 0 {
-					h.log.Err(err).Msgf("object %s is zero bytes", k)
-					return msg, err
-				}
-			}
-
 			input := &dynamodb.PutItemInput{
 				TableName: &h.formatsTbl,
 				Item: map[string]dynamodbTypes.AttributeValue{
 					"user": &dynamodbTypes.AttributeValueMemberS{
 						Value: items[0].User,
 					},
+					"bucket": &dynamodbTypes.AttributeValueMemberS{
+						Value: bucket,
+					},
 					"key": &dynamodbTypes.AttributeValueMemberS{
 						Value: objectKey,
-					},
-					"format": &dynamodbTypes.AttributeValueMemberS{
-						Value: Stream96k,
 					},
 					"filename": &dynamodbTypes.AttributeValueMemberS{
 						Value: items[0].Filename,

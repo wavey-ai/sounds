@@ -13,7 +13,6 @@ touch:
 	openssl rand -base64 12 > lambda/create-clips/.touch
 	openssl rand -base64 12 > lambda/get-clips/.touch
 	openssl rand -base64 12 > lambda/uploads/.touch
-	openssl rand -base64 12 > lambda/pngquant/.touch
 
 .PHONY: deploy
 deploy:
@@ -33,15 +32,6 @@ deploy:
 			HostedZoneId=$(HOSTED_ZONE_ID) \
 			UploadsPrefix=$(UPLOADS_PREFIX)
 
-.PHONY: push_images
-push_images:
-	cd ./lambda/uploads && \
-		docker build -t ${ECR_REPO}:latest -t ${ECR_REPO}:${REV} . && \
-		docker push -a ${ECR_REPO}
-	cd ./lambda/uploads && \
-		docker build -t ${ECR_REPO}:latest -t ${ECR_REPO}:${REV} . && \
-		docker push -a ${ECR_REPO}
-
 .PHONY: cp_zips
 cp_zips:
 	cd ./lambda/get-upload && \
@@ -58,6 +48,9 @@ cp_zips:
 		aws s3 cp build/function.zip s3://$(BOOTSTRAP_BUCKET)/latest/create-clips/
 	cd ./lambda/get-clips && \
 		aws s3 cp build/function.zip s3://$(BOOTSTRAP_BUCKET)/latest/get-clips/
+	cd ./lambda/uploads && \
+		aws s3 cp build/function.zip s3://$(BOOTSTRAP_BUCKET)/latest/uploads/
+
 
 .PHONY: build_zips
 build_zips:
@@ -77,6 +70,9 @@ build_zips:
 	GOOS=linux GOARCH=amd64 go build -o main \
 		&& rm -rf build && mkdir build && zip build/function.zip main
 	cd ./lambda/get-clips && \
+	GOOS=linux GOARCH=amd64 go build -o main \
+		&& rm -rf build && mkdir build && zip build/function.zip main
+	cd ./lambda/uploads && \
 	GOOS=linux GOARCH=amd64 go build -o main \
 		&& rm -rf build && mkdir build && zip build/function.zip main
 	cd ./lambda/test-auth-token && \
