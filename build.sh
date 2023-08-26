@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -e
+set -o pipefail
+
 # the approach here is to hash services individually using md5sum so we
 # only build and push what's required.
 # lambda images are tagged with their md5sum and lambda zips are uploaded
