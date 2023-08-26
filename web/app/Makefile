@@ -13,6 +13,7 @@ build: clean
 	cd ./mel-spec/mel_spec_audio && wasm-pack build --target no-modules --no-typescript --out-dir ../../build --debug
 	sed -i.bak "s/wasm_bindgen/wasm_bindgen_wav/g" build/mel_spec_audio.js
 	git clone https://github.com/wavey-ai/soundkit.git
+	git clone https://github.com/wavey-ai/opus-rs.git
 	cd soundkit && wasm-pack build --no-default-features --target no-modules --no-typescript --out-dir ../build --debug
 	sed -i.bak "s/wasm_bindgen/wasm_bindgen_opus/g" build/soundkit.js
 	cp src/*.js build
