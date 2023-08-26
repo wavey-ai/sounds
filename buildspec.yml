@@ -18,11 +18,11 @@ artifacts:
   files:
     - '.artifacts/*'
   secondary-artifacts:
-    explore:
+    marketing:
       files:
         - '**/*'
-      base-directory: '.artifacts/explore'
-      name: explore
+      base-directory: '.artifacts/marketing'
+      name: marketing
     app:
       files:
         - '**/*'

@@ -1343,7 +1343,7 @@ Resources:
             Value: !Ref DeployBucket
           - Name: APP_BUCKET
             Value: !If [CreateGlobal, !Ref AppBucket, !Ref BootstrapBucket]
-          - Name: EXPLORE_BUCKET
+          - Name: MARKETING_BUCKET
             Value: !If [CreateGlobal, !Ref MarketingBucket, !Ref BootstrapBucket]
           - Name: UPLOADS_BUCKET
             Value: !If [CreateResource, !Ref UploadsBucket, !Ref BootstrapBucket]
