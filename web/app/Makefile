@@ -3,6 +3,7 @@ clean:
 	rm -rf js-colormaps
 	rm -rf soundkit
 
+
 .PHONY: build
 build: clean
 	npm i && npm run build
