@@ -3974,6 +3974,13 @@ cors@latest:
   languageName: node
   linkType: hard
 
+"js-colormaps@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "js-colormaps@npm:1.0.0"
+  checksum: fc0bb20cd1225ae4190424855a5a6f32cf2c07ed7654d940b6ad846dce84c0d8e77029466d66297a3a7f440cee72c9f18473ff30aa8304002ef629186b2b25ea
+  languageName: node
+  linkType: hard
+
 "js-sdsl@npm:^4.1.4":
   version: 4.1.5
   resolution: "js-sdsl@npm:4.1.5"
@@ -4439,20 +4446,6 @@ cors@latest:
     inherits: ^2.0.1
     safe-buffer: ^5.1.2
   checksum: 098494d885684bcc4f92294b18ba61b7bd353c23147fbc4688c75b45cb8590f5a95fd4584d742415dcc52487f7a1ef6ea611cfa1543b0dc4492fe026357f3f0c
-  languageName: node
-  linkType: hard
-
-"mel_spec_audio@file:./mel-spec/mel_spec_audio/pkg/::locator=uploads%40workspace%3A.":
-  version: 0.2.2
-  resolution: "mel_spec_audio@file:./mel-spec/mel_spec_audio/pkg/#./mel-spec/mel_spec_audio/pkg/::hash=1bd384&locator=uploads%40workspace%3A."
-  checksum: 63cf68565f6da991098e755806c65a460e75ceee722949f20505e979fe73f2fb4e870e3d57c2a449c2207c9a361c5da61524d79a7434ef1f55c38a4d8174700d
-  languageName: node
-  linkType: hard
-
-"mel_spec_pipeline@file:./mel-spec/mel_spec_pipeline/pkg/::locator=uploads%40workspace%3A.":
-  version: 0.2.2
-  resolution: "mel_spec_pipeline@file:./mel-spec/mel_spec_pipeline/pkg/#./mel-spec/mel_spec_pipeline/pkg/::hash=ed36fe&locator=uploads%40workspace%3A."
-  checksum: c985e6fa8f1931f0a8f507390efb3e4bdaa56a06bbec7a84f45cabad1a77d70739f81bccdae158d2ea371eae879ead91edb7e4606766cbe765ff62fac856bb85
   languageName: node
   linkType: hard
 
@@ -6562,13 +6555,6 @@ send@latest:
   languageName: node
   linkType: hard
 
-"soundkit@file:./soundkit/pkg/::locator=uploads%40workspace%3A.":
-  version: 0.9.4
-  resolution: "soundkit@file:./soundkit/pkg/#./soundkit/pkg/::hash=68bf04&locator=uploads%40workspace%3A."
-  checksum: 3de5902126387f674102be5d86c35a233fd3b534216aed8a48df577fc7dcc2f7786a82ed850c6cdfb53cb84aa075ff3f2c0a88f4274b0c4ea5c686d4399b47c0
-  languageName: node
-  linkType: hard
-
 "source-map-js@npm:>=0.6.2 <2.0.0, source-map-js@npm:^1.0.2":
   version: 1.0.2
   resolution: "source-map-js@npm:1.0.2"
@@ -7199,11 +7185,10 @@ send@latest:
     eslint-plugin-react: ^7.31.10
     eslint-plugin-react-hooks: ^4.6.0
     fs-extra: ^10.1.0
+    js-colormaps: ^1.0.0
     jwt-decode: ^3.1.2
     live-server: ^1.2.2
     magic-sdk: ^17.3.0
-    mel_spec_audio: "file:./mel-spec/mel_spec_audio/pkg/"
-    mel_spec_pipeline: "file:./mel-spec/mel_spec_pipeline/pkg/"
     npm-run-all: ^4.1.5
     opus-decoder: ^0.7.0
     postcss: ^8.4.23
@@ -7211,7 +7196,6 @@ send@latest:
     react: ^18.2.0
     react-dom: ^18.2.0
     react-range: ^1.8.14
-    soundkit: "file:./soundkit/pkg/"
     tailwindcss: ^3.3.2
   languageName: unknown
   linkType: soft

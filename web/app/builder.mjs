@@ -20,7 +20,7 @@ const isWatch = process.argv.includes("--watch");
  */
 const serverParams = {
   port: 8181, // Set the server port. Defaults to 8080.
-  root: "build", // Set root directory that's being served. Defaults to cwd.
+  root: "dist", // Set root directory that's being served. Defaults to cwd.
   open: false, // When false, it won't load your browser by default.
   // host: "0.0.0.0", // Set the address to bind to. Defaults to 0.0.0.0 or process.env.IP.
   // ignore: 'scss,my/templates', // comma-separated string for paths to ignore
@@ -30,6 +30,9 @@ const serverParams = {
   // logLevel: 2, // 0 = errors only, 1 = some, 2 = lots
   // middleware: [function(req, res, next) { next(); }] // Takes an array of Connect-compatible middleware that are injected into the server middleware stack
   middleware: [(req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+
     const parsedUrl = url.parse(req.url);
     // Remove the /__rev__/ prefix from the URL
     if (parsedUrl.pathname.startsWith('/__rev__/')) {
@@ -38,6 +41,7 @@ const serverParams = {
       res.statusCode = 302;
       res.setHeader('Location', req.url);
       res.end();
+
     } else {
       next();
     }
@@ -52,7 +56,7 @@ const buildParams = {
   color: true,
   entryPoints: ["src/index.jsx"],
   loader: { ".js": "jsx", ".json": "json", ".png": "file", ".jpeg": "file", ".jpg": "file", ".svg": "file" },
-  outdir: "build",
+  outdir: "dist",
   minify: !isWatch,
   format: "cjs",
   bundle: true,
@@ -70,13 +74,13 @@ const buildParams = {
 
 // Clean build folder
 try {
-  fs.removeSync("build");
+  fs.removeSync("dist");
 } catch (err) {
   console.error(err);
 }
 // Copy public folder into build folder
 try {
-  fs.copySync("public", "build");
+  fs.copySync("public", "dist");
 } catch (err) {
   console.error(err);
 }

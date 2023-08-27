@@ -1,6 +1,5 @@
 
 
-
 import React, { createContext, useContext, useState, useEffect, useRef, useLayoutEffect } from "react";
 
 import jwt_decode from "jwt-decode";
@@ -11,9 +10,9 @@ import { apiHost, apiToken } from "./Api";
 import { Player } from "./Player";
 import { AudioManager } from "./AudioManager";
 import { ringbuffer, sharedbuffer } from "./ringbuffer"
-import { startup as startup_mel } from "mel_spec_pipeline";
-import { startup as startup_wav } from "mel_spec_audio";
-import { startup as startup_opus } from "soundkit";
+
+
+const { startup: startup_wav } = wasm_bindgen_wav;
 
 const FileUpload = () => {
   const [files, setFiles] = useContext(FilesContext);
@@ -215,9 +214,6 @@ export default function App() {
   let wav_worker;
   let pcm_worker;
   let opus_worker;
-
-
-
 
 
 
