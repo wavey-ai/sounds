@@ -10,7 +10,7 @@ import { StoreProvider, StoreContext } from "./Store";
 import { apiHost, apiToken } from "./Api";
 import { Player } from "./Player";
 import { AudioManager } from "./AudioManager";
-
+import { ringbuffer, sharedbuffer } from "./ringbuffer"
 import { startup as startup_mel } from "mel_spec_pipeline";
 import { startup as startup_wav } from "mel_spec_audio";
 import { startup as startup_opus } from "soundkit";

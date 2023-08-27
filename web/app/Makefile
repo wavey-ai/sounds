@@ -30,7 +30,6 @@ _build:
 	yarn add mel_spec_audio@file:./mel-spec/mel_spec_audio/pkg/
 	#sed -i.bak "s/wasm_bindgen/wasm_bindgen_opus/g" build/soundkit.js
 	yarn install && yarn run build
-	#cp src/*.js build
-	#cp soundkit/js/* build
-	#cat soundkit/js/ringbuffer.js soundkit/js/worklet.js > build/worklet.js
-	#cp js-colormaps/js-colormaps.js build
+	cp soundkit/js/*work* build
+	cat soundkit/js/ringbuffer.js soundkit/js/worklet.js > build/worklet.js
+	cp js-colormaps/js-colormaps.js build
