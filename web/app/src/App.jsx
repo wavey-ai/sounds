@@ -1,7 +1,3 @@
-const { startup: startup_mel } = wasm_bindgen_mel;
-const { startup: startup_wav } = wasm_bindgen_wav;
-const { startup: startup_opus } = wasm_bindgen_opus;
-
 
 
 
@@ -15,44 +11,9 @@ import { apiHost, apiToken } from "./Api";
 import { Player } from "./Player";
 import { AudioManager } from "./AudioManager";
 
-
-const fftSize = 1024;
-const hopSize = 160;
-const samplingRate = 16000;
-const nMels = 80;
-
-const melBufOpts = {
-  size: nMels + 8,
-  max: 64,
-};
-
-const micBufOpts = {
-  size: 128,
-  max: 64,
-};
-
-const wavBufOpts = {
-  size: 160,
-  max: 200_000,
-};
-
-const melSab = sharedbuffer(melBufOpts.size, melBufOpts.max, Uint8ClampedArray);
-const melBuf = ringbuffer(
-  melSab,
-  melBufOpts.size,
-  melBufOpts.max,
-  Uint8ClampedArray
-);
-const micSab = sharedbuffer(micBufOpts.size, micBufOpts.max, Float32Array);
-const wavSab = sharedbuffer(wavBufOpts.size, wavBufOpts.max, Float32Array);
-
-let wav_worker;
-let pcm_worker;
-let opus_worker;
-
-
-
-
+import { startup as startup_mel } from "mel_spec_pipeline";
+import { startup as startup_wav } from "mel_spec_audio";
+import { startup as startup_opus } from "soundkit";
 
 const FileUpload = () => {
   const [files, setFiles] = useContext(FilesContext);
@@ -220,6 +181,46 @@ function Tasks({ task }) {
 let audioCtx = new AudioContext();
 
 export default function App() {
+
+  const fftSize = 1024;
+  const hopSize = 160;
+  const samplingRate = 16000;
+  const nMels = 80;
+
+  const melBufOpts = {
+    size: nMels + 8,
+    max: 64,
+  };
+
+  const micBufOpts = {
+    size: 128,
+    max: 64,
+  };
+
+  const wavBufOpts = {
+    size: 160,
+    max: 200_000,
+  };
+
+  const melSab = sharedbuffer(melBufOpts.size, melBufOpts.max, Uint8ClampedArray);
+  const melBuf = ringbuffer(
+    melSab,
+    melBufOpts.size,
+    melBufOpts.max,
+    Uint8ClampedArray
+  );
+  const micSab = sharedbuffer(micBufOpts.size, micBufOpts.max, Float32Array);
+  const wavSab = sharedbuffer(wavBufOpts.size, wavBufOpts.max, Float32Array);
+
+  let wav_worker;
+  let pcm_worker;
+  let opus_worker;
+
+
+
+
+
+
   const [user, setUser] = useState(null);
   const [jwt, setJwt] = useState(null);
   const [task, setTask] = useState(null);
