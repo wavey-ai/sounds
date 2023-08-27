@@ -45,12 +45,12 @@ for site in marketing app; do
   else
     cd web/${site} && make build && cd "${CODEBUILD_SRC_DIR}"
 
-    for file in web/${site}/build/*.html web/${site}/build/*.js; do
+    for file in web/${site}/dist/*.html web/${site}/dist/*.js; do
       sed -i.bak "s/__rev__/${rev}/g" "$file"
     done
-    sed -i.bak "s/manifest.json/\/${rev}\/manifest.json/g" web/${site}/build/index.html
-    cp web/${site}/build/* ".artifacts/${site}/${rev}"
-    cp web/${site}/build/index.html ".artifacts/${site}/"
+    sed -i.bak "s/manifest.json/\/${rev}\/manifest.json/g" web/${site}/dist/index.html
+    cp web/${site}/dist/* ".artifacts/${site}/${rev}"
+    cp web/${site}/dist/index.html ".artifacts/${site}/"
   fi
 done
 
